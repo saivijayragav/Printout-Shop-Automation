@@ -1,0 +1,58 @@
+# Flutter & Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Android specific
+android/.gradle/
+android/captures/
+android/app/build/
+**/android/local.properties
+
+# iOS specific
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/.symlinks/
+ios/Pods/
+ios/build/
+ios/Runner.xcworkspace/
+**/ios/Podfile.lock
+
+# Xcode specific
+*.xcuserstate
+*.xcworkspace
+*.xcuserdata/
+
+# macOS
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/build/
+**/macos/Podfile.lock
+
+# Windows
+windows/flutter/ephemeral/
+windows/build/
+
+# Linux
+linux/flutter/ephemeral/
+linux/build/
+
+
+# VS Code
+.vscode/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log

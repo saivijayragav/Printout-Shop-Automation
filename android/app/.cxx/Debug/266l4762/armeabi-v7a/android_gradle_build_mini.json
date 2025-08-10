@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "C:\\flutter\\src\\flutter\\packages\\flutter_tools\\gradle\\src\\main\\groovy\\CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Users\\Sai Vijay Ragav\\AppData\\Local\\Android\\sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+      "-C",
+      "C:\\Users\\Sai Vijay Ragav\\AndroidStudioProjects\\xerox_shop_app_using_Flutter\\Xerox_Shop\\android\\app\\.cxx\\Debug\\266l4762\\armeabi-v7a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Users\\Sai Vijay Ragav\\AppData\\Local\\Android\\sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+    "-C",
+    "C:\\Users\\Sai Vijay Ragav\\AndroidStudioProjects\\xerox_shop_app_using_Flutter\\Xerox_Shop\\android\\app\\.cxx\\Debug\\266l4762\\armeabi-v7a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}

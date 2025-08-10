@@ -1,0 +1,1 @@
+C:\Users\Sai Vijay Ragav\AndroidStudioProjects\xerox_shop_app_using_Flutter\Xerox_Shop\build\app\intermediates\cxx\RelWithDebInfo\q62j2j3q\obj\armeabi-v7a

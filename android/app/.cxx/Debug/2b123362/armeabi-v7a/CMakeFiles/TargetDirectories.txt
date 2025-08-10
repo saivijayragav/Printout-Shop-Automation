@@ -1,0 +1,2 @@
+C:/Users/Sai Vijay Ragav/Downloads/Xerox_Shop/Xerox_Shop/Xerox_Shop/android/app/.cxx/Debug/2b123362/armeabi-v7a/CMakeFiles/edit_cache.dir
+C:/Users/Sai Vijay Ragav/Downloads/Xerox_Shop/Xerox_Shop/Xerox_Shop/android/app/.cxx/Debug/2b123362/armeabi-v7a/CMakeFiles/rebuild_cache.dir

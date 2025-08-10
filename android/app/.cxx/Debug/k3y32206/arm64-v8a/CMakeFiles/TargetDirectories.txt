@@ -1,0 +1,2 @@
+C:/Users/Sai Vijay Ragav/AndroidStudioProjects/xerox_shop_app_using_Flutter/Xerox_Shop/android/app/.cxx/Debug/k3y32206/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/Sai Vijay Ragav/AndroidStudioProjects/xerox_shop_app_using_Flutter/Xerox_Shop/android/app/.cxx/Debug/k3y32206/arm64-v8a/CMakeFiles/rebuild_cache.dir
