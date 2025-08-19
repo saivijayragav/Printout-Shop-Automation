@@ -24,10 +24,15 @@ class _UploadPageState extends State<UploadPage> {
   static const int SIZE_LIMIT = 10;
 
   Future<int> getPdfPageCount(String path) async {
+    try{
     final file = File(path);
     final bytes = await file.readAsBytes();
     final document = PdfDocument(inputBytes: bytes);
     return document.pages.count;
+  } catch (e){
+      print("Getting pages count faild");
+      rethrow;
+    }
   }
 
   void addFiles(List<FileData> newFiles, Sides side, PrintColor color, BindingType binding) {
@@ -46,6 +51,7 @@ class _UploadPageState extends State<UploadPage> {
 
   Future<void> nextpage() async {
     String id = generateCode(4);
+    if(pages >= 30){
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -60,15 +66,12 @@ class _UploadPageState extends State<UploadPage> {
         ),
       ),
     );
-  }
-
-  Future<void> tryGetFilesWithCheck() async {
-    if (!SettingsService.liveOrdersEnabled) {
+  } else{
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text("Admin Closed"),
-          content: const Text("Live Orders are currently disabled by the admin."),
+          title: const Text("Pages criteria not met"),
+          content: const Text("The order should have atleast 30 pages."),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -77,23 +80,59 @@ class _UploadPageState extends State<UploadPage> {
           ],
         ),
       );
+    }
+  }
+
+  Future<void> tryGetFilesWithCheck() async {
+    if (!SettingsService.liveOrdersEnabled) {
+      showDialog(
+        context: context,
+        builder: (context) =>
+            AlertDialog(
+              title: const Text("Admin Closed"),
+              content: const Text(
+                  "Live Orders are currently disabled by the admin."),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("OK"),
+                )
+              ],
+            ),
+      );
       return;
     }
-
-    await getFiles();
+    try {
+      await getFiles();
+    } catch (e) {
+      debugPrint("Something went wrong while getting files");
+      showDialog(
+          context: context,
+          builder: (_) => const AlertDialog(
+            title: Text("Something went wrong"),
+            content: Text("We couldn’t process your file. Please try again."),
+          )
+      );
+    }
   }
 
   Future<void> getFiles() async {
     setState(() {
       isLoading = true;
     });
-
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      withData: true,
-      allowMultiple: false,
-      allowedExtensions: ['pdf', 'jpg', 'png'],
-    );
+    FilePickerResult? result;
+    try {
+        result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        withData: true,
+        allowMultiple: false,
+        allowedExtensions: ['pdf', 'jpg', 'png'],
+      );
+    } catch (e){
+      debugPrint("Error fetching files");
+      isLoading = false;
+      return;
+    }
 
     if (result != null) {
       double temp = 0;
@@ -127,8 +166,13 @@ class _UploadPageState extends State<UploadPage> {
       int newPageCount = 0;
       for (var file in result.files) {
         var pagecount = 1;
+        try{
         if (file.extension == "pdf") {
           pagecount = await getPdfPageCount(file.path!);
+        }
+        } catch(e){
+          debugPrint("Failed to read PDF ${file.name}: $e");
+          continue;
         }
         newPageCount += pagecount;
         pages += pagecount;
@@ -215,7 +259,7 @@ class _UploadPageState extends State<UploadPage> {
                       ],
                     ),
                     const SizedBox(height: 9),
-                    Divider(thickness: 2),
+                    const Divider(thickness: 2),
                     const SizedBox(height: 9),
                     Expanded(
                       child: ListView.builder(
@@ -295,7 +339,7 @@ class _UploadPageState extends State<UploadPage> {
                       ),
                     ),
                     const SizedBox(height: 9),
-                    Divider(thickness: 2),
+                    const Divider(thickness: 2),
                     const SizedBox(height: 9),
                     Row(
                       children: [
@@ -322,8 +366,8 @@ class _UploadPageState extends State<UploadPage> {
                             alignment: AlignmentDirectional.bottomEnd,
                             child: FloatingActionButton(
                               backgroundColor: const Color(0xFFE2E2B6),
-                              child: const Icon(CupertinoIcons.arrow_right, color: Colors.black),
                               onPressed: nextpage,
+                              child: const Icon(CupertinoIcons.arrow_right, color: Colors.black),
                             ),
                           ),
                       ],
