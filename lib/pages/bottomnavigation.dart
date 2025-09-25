@@ -103,7 +103,7 @@ class _MainScaffoldState extends State<MainScaffold> {
               child: Transform.translate(
                 offset: Offset(0, 4), // Subscript offset
                 child: Text(
-                  'RS',
+                  ' RS',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
