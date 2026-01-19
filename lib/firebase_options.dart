@@ -3,6 +3,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -46,8 +47,8 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyBWBBfUN_TGOXJJuCtQIzmXVarrDbksYv4',
+  static FirebaseOptions get web => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_WEB_API_KEY'] ?? 'AIzaSyBWBBfUN_TGOXJJuCtQIzmXVarrDbksYv4',
     appId: '1:551407891437:web:43bd3260db6a40fce9ede4',
     messagingSenderId: '551407891437',
     projectId: 'arcade-9541f',
@@ -56,16 +57,16 @@ class DefaultFirebaseOptions {
     measurementId: 'G-V3EZ92ESHW',
   );
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCLF7auEIMPot2cH_1vLJPKWwF3zni3TNw',
+  static FirebaseOptions get android => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_ANDROID_API_KEY'] ?? 'AIzaSyCLF7auEIMPot2cH_1vLJPKWwF3zni3TNw',
     appId: '1:551407891437:android:20486788e33f8b5be9ede4',
     messagingSenderId: '551407891437',
     projectId: 'arcade-9541f',
     storageBucket: 'arcade-9541f.firebasestorage.app',
   );
 
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBV12NkOqre_goWjB-v5WTN8nElXQwSkVQ',
+  static FirebaseOptions get ios => FirebaseOptions(
+    apiKey: dotenv.env['FIREBASE_IOS_API_KEY'] ?? 'AIzaSyBV12NkOqre_goWjB-v5WTN8nElXQwSkVQ',
     appId: '1:551407891437:ios:181d51411c364060e9ede4',
     messagingSenderId: '551407891437',
     projectId: 'arcade-9541f',

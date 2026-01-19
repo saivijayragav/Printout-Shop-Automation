@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:RITArcade/pages/bottomnavigation.dart';
 import 'package:RITArcade/pages/upload.dart';
 import 'package:RITArcade/services/payment_history_page.dart';
@@ -31,6 +32,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // ✅ Load environment variables
+  await dotenv.load(fileName: ".env");
 
   if (Firebase.apps.isEmpty) {
     await Firebase.initializeApp();
