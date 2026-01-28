@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'newtypes.dart'; // Contains OrderData and FileData classes
+import 'new_types.dart'; // Contains OrderData and FileData classes
 
 class Pricing {
   final double printPrice;

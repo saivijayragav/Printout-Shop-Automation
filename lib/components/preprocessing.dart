@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import '../components/newtypes.dart';
+import '../components/new_types.dart';
 
 void sanitizeFileName(List<FileData> files, {int maxBytes = 1000}) {
   for (var file in files) {

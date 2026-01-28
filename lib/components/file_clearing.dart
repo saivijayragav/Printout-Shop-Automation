@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
-import 'newtypes.dart';
+import 'new_types.dart';
 
 Future<void> clearCache(List<FileData> files) async{
   for(var file in files){

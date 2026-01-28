@@ -1,4 +1,4 @@
-import 'package:RITArcade/components/newtypes.dart';
+import 'package:RITArcade/components/new_types.dart';
 
 
 int calculateTime(OrderData order) {

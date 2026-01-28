@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:RITArcade/components/preprocessing.dart';
-import 'package:RITArcade/services/firestore.dart';
-import '../components/fileclearing.dart';
-import '../components/newtypes.dart';
-import '../services/cloudflarebackend.dart';
-import 'bottomnavigation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../components/file_clearing.dart';
+import '../components/new_types.dart';
+import '../services/cloudflare_backend.dart';
+import '../services/order_service.dart';
+import 'bottom_navigation.dart';
 
 class OrderProcessingPage extends StatefulWidget {
   final OrderData order;
-  const OrderProcessingPage({
-    super.key,
-    required this.order
-});
+  const OrderProcessingPage({super.key, required this.order});
   @override
   _OrderProcessingPageState createState() => _OrderProcessingPageState();
 }
@@ -27,30 +25,25 @@ class _OrderProcessingPageState extends State<OrderProcessingPage> {
     placeOrder();
   }
 
-  // Placeholder async function 1
-  Future<void> processPayment() async {
-    FirestoreService service = FirestoreService();
-    await service.addOrder(widget.order); // Simulate API call
-    print("Order Placed");
-  }
-
-  // Placeholder async function 2
-  Future<void> updateInventory() async {
-    await uploader(widget.order); // Simulate API call
-    print("Inventory updated");
-  }
-
-  Future<void> clearFiles() async{
-    await clearCache(widget.order.files);
-  }
   // Function to handle order placement
   Future<void> placeOrder() async {
     try {
       sanitizeFileName(widget.order.files); // Change the file names
-      // Execute both async functions simultaneously
-      await processPayment();
-      await updateInventory();
-      await clearFiles();
+
+      // 1. Get User Details
+      final prefs = await SharedPreferences.getInstance();
+      widget.order.userName = prefs.getString('userName') ?? "Unknown";
+      widget.order.phoneNumber = prefs.getString('userPhone') ?? "Unknown";
+
+      // 2. Upload to Cloudflare
+      await uploader(widget.order);
+
+      // 3. Send Data to Backend
+      await OrderService.sendOrderToBackend(widget.order);
+
+      // 4. Clear local cache
+      await clearCache(widget.order.files);
+
       // Show success message
       setState(() {
         isLoading = false;
@@ -67,14 +60,15 @@ class _OrderProcessingPageState extends State<OrderProcessingPage> {
       );
     } catch (error) {
       // Handle error
+      print("Order processing failed: $error");
       setState(() {
         isLoading = false;
         showSuccess = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Order failed. Please try again.'),
+        SnackBar(
+          content: Text('Order failed: $error'),
           backgroundColor: Colors.red,
         ),
       );
@@ -116,7 +110,6 @@ class _OrderProcessingPageState extends State<OrderProcessingPage> {
                 ),
               ),
             ],
-
             if (showSuccess) ...[
               // Success state
               Container(
@@ -219,10 +212,13 @@ class NextPage extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (_) => const MainScaffold(selectedIndex: 3),
                       ),
-                          (route) => false,
+                      (route) => false,
                     );
                   },
-                  child: const Text('Order History', style: TextStyle(color: Colors.black),),
+                  child: const Text(
+                    'Order History',
+                    style: TextStyle(color: Colors.black),
+                  ),
                 ),
               ),
             ],

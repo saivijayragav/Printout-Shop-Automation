@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:RITArcade/components/pagegenerator.dart';
-import 'package:RITArcade/components/pricecalculation.dart';
-import 'package:RITArcade/components/timecalculation.dart';
+import 'package:RITArcade/components/page_generator.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:RITArcade/services/payment_service.dart';
 import 'package:RITArcade/services/payment_model.dart';
-import '../pages/bottomnavigation.dart';
-import '../pages/orderprocessing.dart';
-import 'newtypes.dart';
+import 'package:RITArcade/services/razorpay_handler.dart';
+import '../pages/bottom_navigation.dart';
+import '../pages/order_processing.dart';
+import 'new_types.dart';
 import 'dart:typed_data';
 
 class TotalPage extends StatefulWidget {
@@ -20,83 +19,42 @@ class TotalPage extends StatefulWidget {
 }
 
 class _TotalPageState extends State<TotalPage> {
-  late Razorpay _razorpay;
+  late RazorpayHandler _razorpayHandler;
   final PaymentService _paymentService = PaymentService();
 
   @override
   void initState() {
     super.initState();
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    _razorpayHandler = RazorpayHandler(
+      onSuccess: _handlePaymentSuccess,
+      onFailure: _handlePaymentError,
+      onExternalWallet: _handleExternalWallet,
+    );
+    _razorpayHandler.init();
 
     _prepareOrder(); // 🛠 Setup with front page + price
   }
 
   Future<void> _prepareOrder() async {
-    // ✅ Check if front page already added (assuming '.pdf' is the name)
-    bool frontPageExists = widget.order.files.any((f) => f.name == '.pdf');
-
-    if (!frontPageExists) {
-      // ✅ Add front page to files
-      Uint8List front = await generatePdfWithCode(widget.order.orderId);
-      widget.order.files.add(FileData(
-        name: '.pdf',
-        size: front.lengthInBytes / (1024 * 1024),
-        pages: 1,
-        bytes: front,
-        copies: 1,
-        type: 'pdf',
-        path: '',
-        sides: "Single Side",
-        color: "Black and White",
-        binding: "No Binding",
-      ));
-    }
-
-    // ✅ Recalculate total page count
     int totalPages = 0;
     for (var file in widget.order.files) {
       totalPages += file.pages * file.copies;
     }
     widget.order.pages = totalPages;
-
-    // ✅ Recalculate price
-    double price = await calculateTotal(widget.order);
-
-    setState(() {
-      widget.order.price = price;
-      widget.order.time = calculateTime(widget.order);
-    });
   }
 
   @override
   void dispose() {
-    _razorpay.clear();
+    _razorpayHandler.dispose();
     super.dispose();
   }
 
   void _proceedToPayment() async {
-    int amountInPaise = (widget.order.price * 100).round();
-    var options = {
-      'key': "rzp_test_QzO1IADyDArzhi",
-      'amount': amountInPaise,
-      'name': 'Arcade Xerox Shop',
-      'description': 'Printing Service',
-      'retry': {'enabled': true, 'max_count': 1},
-      'send_sms_hash': true,
-      'prefill': {'contact': '', 'email': 'test@razorpay.com'},
-      'external': {
-        'wallets': ['paytm'],
-        'upi': true,
-      }
-    };
-    try {
-      _razorpay.open(options);
-    } catch (e) {
-      debugPrint('Error: $e');
-    }
+    _razorpayHandler.openCheckout(
+      amount: widget.order.price,
+      name: 'Arcade Xerox Shop',
+      description: 'Printing Service',
+    );
   }
 
   Future<void> _handlePaymentSuccess(PaymentSuccessResponse response) async {
@@ -168,13 +126,11 @@ class _TotalPageState extends State<TotalPage> {
           Text(label,
               style: TextStyle(
                   fontSize: 18,
-                  fontWeight:
-                      isBold ? FontWeight.bold : FontWeight.normal)),
+                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
           Text(value,
               style: TextStyle(
                   fontSize: 18,
-                  fontWeight:
-                      isBold ? FontWeight.bold : FontWeight.normal)),
+                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
         ],
       ),
     );
@@ -182,6 +138,144 @@ class _TotalPageState extends State<TotalPage> {
 
   @override
   Widget build(BuildContext context) {
+    // If receipt is missing, show basic summary (fallback)
+    if (widget.order.receipt == null || widget.order.receipt!.items.isEmpty) {
+      return _buildFallbackView();
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text("Order Summary")),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: widget.order.receipt!.items.length,
+              itemBuilder: (context, index) {
+                final item = widget.order.receipt!.items[index];
+                return Card(
+                  elevation: 2,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.description,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              "₹${item.cost.toStringAsFixed(2)}",
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8.0, // gap between adjacent chips
+                          runSpacing: 4.0, // gap between lines
+                          children: [
+                            _buildInfoBadge("${item.pages} pgs"),
+                            // Assuming sides: 1=Single, 2=Double etc.
+                            // You might need a helper maps int -> text if needed
+                            _buildInfoBadge(item.sides == 1
+                                ? "1 Side"
+                                : item.sides == 2
+                                    ? "2 Sides"
+                                    : "${item.sides} Sides"),
+                            _buildInfoBadge(
+                                item.colorRate > 0 ? "Color" : "B&W"),
+                            if (item.bindingNote != "No Binding" &&
+                                item.bindingNote.isNotEmpty)
+                              _buildInfoBadge(item.bindingNote),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          _buildBottomPanel(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoBadge(String text) {
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE2E2B6),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child:
+          Text(text, style: const TextStyle(fontSize: 12, color: Colors.black)),
+    );
+  }
+
+  Widget _buildBottomPanel() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: const BoxDecoration(
+        color: Color(0xFF6EACDA),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Total Payable",
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black)),
+                      Text("₹${widget.order.price.toStringAsFixed(2)}",
+                  style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _proceedToPayment,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                backgroundColor: Colors.black,
+              ),
+              child: const Text("Proceed to Pay",
+                  style: TextStyle(color: Colors.white, fontSize: 16)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFallbackView() {
     return Scaffold(
       appBar: AppBar(title: const Text("Total Amount")),
       body: Padding(
@@ -193,8 +287,8 @@ class _TotalPageState extends State<TotalPage> {
             _buildRow("Total Pages :", "${widget.order.pages}"),
             const SizedBox(height: 30),
             const Divider(thickness: 1),
-            _buildRow("Total Price :",
-                "₹${widget.order.price.toStringAsFixed(2)}",
+            _buildRow(
+                "Total Price :", "₹${widget.order.price.toStringAsFixed(2)}",
                 isBold: true),
             const Spacer(),
             Column(

@@ -25,80 +25,20 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    getCounts();
     _loadSavedEmail();
     _initFCM(); // ✅ Initialize FCM
   }
 
-  Future<void> getCounts() async {
-    final snapshot = await firestoreService.getOrderSnapshot();
-
-    final uniqueOrderIds = <String>{};
-    int totalPages = 0;
-    int totalCopies = 0;
-    int specialBindingCount = 0;
-
-    for (var doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final orderId = data['orderID'];
-      final pages = int.tryParse(data['pages']?.toString() ?? '0') ?? 0;
-
-      if (orderId != null && !uniqueOrderIds.contains(orderId)) {
-        uniqueOrderIds.add(orderId);
-        totalPages += pages;
-
-        final files = data['files'] as List<dynamic>?;
-        if (files != null) {
-          for (var file in files) {
-            final fileMap = file as Map<String, dynamic>;
-            final copies = int.tryParse(fileMap['copies']?.toString() ?? '1') ?? 1;
-            final binding = (fileMap['binding'] ?? '').toString().toLowerCase();
-
-            totalCopies += copies;
-            if (binding.contains('spiral') || binding.contains('soft')) {
-              specialBindingCount++;
-            }
-          }
-        }
-      }
-    }
-
-    final totalOrders = uniqueOrderIds.length;
-    _count = totalOrders;
-
-    final totalSeconds = (totalOrders * 60) +
-        (totalPages * 1) +
-        (totalCopies * 15) +
-        (specialBindingCount * 15 * 60);
-
-    String formatted;
-    if (totalSeconds >= 3600) {
-      final hours = totalSeconds ~/ 3600;
-      final minutes = (totalSeconds % 3600) ~/ 60;
-      final seconds = totalSeconds % 60;
-      formatted = "$hours hr${minutes > 0 ? ' $minutes min' : ''}${seconds > 0 ? ' $seconds sec' : ''}";
-    } else if (totalSeconds >= 60) {
-      final minutes = totalSeconds ~/ 60;
-      final seconds = totalSeconds % 60;
-      formatted = "$minutes min${seconds > 0 ? ' $seconds sec' : ''}";
-    } else {
-      formatted = "$totalSeconds sec";
-    }
-
-    setState(() {
-      _estimatedTime = 'Estimated Time: 1 day $formatted';
-    });
-  }
-
   Future<void> _loadSavedEmail() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('savedEmail');
+    final name = prefs.getString('userName') ?? "User"; // Fallback if missing
+    // We can also fetch phone if needed: final phone = prefs.getString('userPhone');
+
     setState(() {
-      userEmail = email;
+      userEmail = name; // repurpose userEmail variable for Name display
     });
   }
 
-  // ✅ NEW: Firebase Messaging Initialization
   Future<void> _initFCM() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
@@ -118,7 +58,6 @@ class _HomePageState extends State<HomePage> {
 
     // Get FCM token
     String? token = await messaging.getToken();
-    print('📱 FCM Token: $token');
 
     // Save to Firestore (if logged in)
     final user = FirebaseAuth.instance.currentUser;
@@ -163,15 +102,14 @@ class _HomePageState extends State<HomePage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Image(
-                  image: AssetImage('assets/queue.png'),
-                  width: 70,
-                  height: 70),
+                  image: AssetImage('assets/queue.png'), width: 70, height: 70),
               Text('$_count',
                   style: const TextStyle(
                       fontSize: 64,
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
-              Text('Orders in queue', style: TextStyle(color: Colors.grey[300])),
+              Text('Orders in queue',
+                  style: TextStyle(color: Colors.grey[300])),
               const SizedBox(height: 20),
               Text(
                 _estimatedTime,

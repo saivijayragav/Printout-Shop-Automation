@@ -1,6 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:RITArcade/components/newtypes.dart';
+import 'package:RITArcade/components/new_types.dart';
 
 class PrintConfigDialog extends StatefulWidget {
   final int pages;

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'newtypes.dart';
+import 'new_types.dart';
 class OptionBuilder<T> extends StatelessWidget {
 
   final T value;

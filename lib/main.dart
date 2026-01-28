@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:RITArcade/pages/bottomnavigation.dart';
+import 'package:RITArcade/pages/bottom_navigation.dart';
 import 'package:RITArcade/pages/upload.dart';
 import 'package:RITArcade/services/payment_history_page.dart';
-import 'package:RITArcade/pages/loadingpage.dart';
+import 'package:RITArcade/pages/loading_page.dart';
 import 'package:RITArcade/pages/login_page.dart';
 import 'package:RITArcade/pages/no_internet.dart';
 import 'package:RITArcade/pages/notification_page.dart';
@@ -66,10 +66,10 @@ class XeroxShopApp extends StatelessWidget {
       routes: {
         '/': (context) => LoadingPage(),
         '/login': (context) => LoginPage(),
-        '/home': (context) => MainScaffold(),
-        '/upload': (context) => UploadPage(),
+        '/home': (context) => const MainScaffold(),
+        '/upload': (context) => const UploadPage(),
         '/payment_history': (context) => const OrderHistoryPage(),
-        // Add route if you want: '/notifications': (_) => const NotificationPage(),
+        '/notifications': (_) => const NotificationPage(),
       },
     );
   }
