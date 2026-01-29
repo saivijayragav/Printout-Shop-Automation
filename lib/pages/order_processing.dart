@@ -6,6 +6,8 @@ import '../components/new_types.dart';
 import '../services/cloudflare_backend.dart';
 import '../services/order_service.dart';
 import 'bottom_navigation.dart';
+import '../utils/app_exceptions.dart';
+import '../components/ui_helpers.dart';
 
 class OrderProcessingPage extends StatefulWidget {
   final OrderData order;
@@ -15,63 +17,68 @@ class OrderProcessingPage extends StatefulWidget {
 }
 
 class _OrderProcessingPageState extends State<OrderProcessingPage> {
-  bool isLoading = true; // Start with loading true
+  bool isLoading = true;
   bool showSuccess = false;
+  String? errorMessage; // To store error message for retry UI
 
   @override
   void initState() {
     super.initState();
-    // Automatically start processing when page loads
     placeOrder();
   }
 
-  // Function to handle order placement
   Future<void> placeOrder() async {
-    try {
-      sanitizeFileName(widget.order.files); // Change the file names
+    setState(() {
+      isLoading = true;
+      errorMessage = null; // Reset error
+    });
 
-      // 1. Get User Details
+    try {
+      sanitizeFileName(widget.order.files);
+
       final prefs = await SharedPreferences.getInstance();
       widget.order.userName = prefs.getString('userName') ?? "Unknown";
       widget.order.phoneNumber = prefs.getString('userPhone') ?? "Unknown";
 
-      // 2. Upload to Cloudflare
+      // Add timestamp
+      widget.order.timestamp = DateTime.now().toIso8601String();
+
       await uploader(widget.order);
-
-      // 3. Send Data to Backend
       await OrderService.sendOrderToBackend(widget.order);
-
-      // 4. Clear local cache
       await clearCache(widget.order.files);
 
-      // Show success message
       setState(() {
         isLoading = false;
         showSuccess = true;
       });
 
-      // Wait for 2 seconds to show success message, then navigate
       await Future.delayed(const Duration(seconds: 2));
       if (!mounted) return;
-      // Navigate to next page
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const NextPage()),
       );
     } catch (error) {
-      // Handle error
       print("Order processing failed: $error");
       setState(() {
         isLoading = false;
         showSuccess = false;
+
+        // Set user-friendly error message based on exception type
+        if (error is NetworkException) {
+          errorMessage = "No Internet Connection. Please check your network.";
+        } else if (error is UploadException) {
+          errorMessage = "Failed to upload files. Please try again.";
+        } else if (error is BackendException) {
+          errorMessage = "Server Error. Please try again later.";
+        } else {
+          errorMessage = "An unexpected error occurred.";
+        }
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Order failed: $error'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // Also show snackbar for immediate feedback
+      UIHelpers.showErrorSnackBar(context, errorMessage!);
     }
   }
 
@@ -86,7 +93,6 @@ class _OrderProcessingPageState extends State<OrderProcessingPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (isLoading) ...[
-              // Loading state
               const CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
                 strokeWidth: 3,
@@ -107,6 +113,38 @@ class _OrderProcessingPageState extends State<OrderProcessingPage> {
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey[500],
+                ),
+              ),
+            ] else if (errorMessage != null) ...[
+              // Error State with Retry
+              const Icon(Icons.error_outline, color: Colors.red, size: 60),
+              const SizedBox(height: 20),
+              Text(
+                "Order Failed",
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade700),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 30),
+                child: Text(
+                  errorMessage!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, color: Colors.black87),
+                ),
+              ),
+              const SizedBox(height: 30),
+              ElevatedButton.icon(
+                onPressed: placeOrder, // Retry action
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                label: const Text("Retry Order",
+                    style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade700,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
                 ),
               ),
             ],

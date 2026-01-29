@@ -52,6 +52,8 @@ class OrderData {
   Receipt? receipt;
   String? userName;
   String? phoneNumber;
+  String? transactionId;
+  String? timestamp;
 
   OrderData({
     required this.orderId,
@@ -61,6 +63,8 @@ class OrderData {
     this.receipt,
     this.userName,
     this.phoneNumber,
+    this.transactionId,
+    this.timestamp,
   });
 
   Map<String, dynamic> toJson() {
@@ -72,6 +76,8 @@ class OrderData {
       'receipt': receipt?.toJson(),
       'userName': userName,
       'phoneNumber': phoneNumber,
+      'transactionId': transactionId,
+      'timestamp': timestamp,
     };
   }
 }

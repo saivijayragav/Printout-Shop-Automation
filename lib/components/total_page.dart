@@ -69,6 +69,9 @@ class _TotalPageState extends State<TotalPage> {
       const SnackBar(content: Text("✅ Payment Successful (Test Mode)")),
     );
 
+    // Assign transaction ID to order
+    widget.order.transactionId = response.paymentId;
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -245,7 +248,7 @@ class _TotalPageState extends State<TotalPage> {
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: Colors.black)),
-                      Text("₹${widget.order.price.toStringAsFixed(2)}",
+              Text("₹${widget.order.price.toStringAsFixed(2)}",
                   style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,

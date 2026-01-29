@@ -2,12 +2,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FirebaseMessagingService {
-  static final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
-  static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  static final FirebaseMessaging _firebaseMessaging =
+      FirebaseMessaging.instance;
+  static final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
 
   static Future<void> initialize() async {
     // 🔐 Request permission
@@ -15,17 +17,15 @@ class FirebaseMessagingService {
 
     // 🎯 Get FCM token
     final token = await _firebaseMessaging.getToken();
-    final user = FirebaseAuth.instance.currentUser;
-    final userId = user?.uid;
 
-    if (userId != null && token != null) {
-      await FirebaseFirestore.instance.collection('users').doc(userId).set({
-        'fcmToken': token,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      debugPrint('✅ Token saved for user: $userId');
+    // Check for user in SharedPreferences since we aren't using FirebaseAuth
+    final prefs = await SharedPreferences.getInstance();
+    final userPhone = prefs.getString('userPhone');
+
+    if (userPhone != null && token != null) {
+      await saveTokenForUser(userPhone);
     } else {
-      debugPrint('⚠️ Token or userId is null');
+      debugPrint('⚠️ Token or userPhone is null');
     }
 
     // ✅ Init local notifications
@@ -40,7 +40,8 @@ class FirebaseMessagingService {
       importance: Importance.max,
     );
     await _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
 
     // ✅ Foreground notification handler using `data` only
@@ -68,6 +69,25 @@ class FirebaseMessagingService {
 
     // ✅ Background/terminated state handler
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+  }
+
+  // New method to manually save token (e.g., after login)
+  static Future<void> saveTokenForUser(String phoneNumber) async {
+    final token = await _firebaseMessaging.getToken();
+    if (token != null) {
+      // Use phone number as document ID
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(phoneNumber)
+          .set({
+        'fcmToken': token,
+        'phoneNumber': phoneNumber,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('✅ Token saved for user: $phoneNumber');
+    } else {
+      debugPrint('⚠️ Failed to get token for saving');
+    }
   }
 }
 

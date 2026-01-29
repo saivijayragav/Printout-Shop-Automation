@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_login/flutter_login.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/firebase_messaging_service.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
@@ -23,6 +24,9 @@ class LoginPage extends StatelessWidget {
     await prefs.setBool('isLoggedIn', true);
     await prefs.setString('userName', data.name);
     await prefs.setString('userPhone', data.password);
+
+    // Save FCM Token
+    await FirebaseMessagingService.saveTokenForUser(data.password);
 
     return null; // Return null means success
   }
