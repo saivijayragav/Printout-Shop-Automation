@@ -22,7 +22,6 @@ class _UploadPageState extends State<UploadPage> {
   bool isLoading = false;
   int pages = 0;
   double size = 0;
-  static const int SIZE_LIMIT = 10;
 
   Future<int> getPdfPageCount(String path) async {
     try {
@@ -57,7 +56,7 @@ class _UploadPageState extends State<UploadPage> {
   }
 
   Future<void> nextpage() async {
-    String id = generateCode(4);
+    String id = generateCode(6);
     OrderData order = OrderData(
       orderId: id,
       files: files,
@@ -67,7 +66,7 @@ class _UploadPageState extends State<UploadPage> {
     Receipt receipt = await getPrice(order);
     order.receipt = receipt;
     order.price = double.tryParse(receipt.totalPrice) ?? 0.0;
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => TotalPage(
@@ -75,6 +74,13 @@ class _UploadPageState extends State<UploadPage> {
         ),
       ),
     );
+    if (mounted) {
+      setState(() {
+        files.clear();
+        pages = 0;
+        size = 0;
+      });
+    }
   }
 
   Future<void> tryGetFilesWithCheck() async {
@@ -128,34 +134,6 @@ class _UploadPageState extends State<UploadPage> {
     }
 
     if (result != null) {
-      double temp = 0;
-      for (var file in result.files) {
-        temp += file.size / (1024 * 1024);
-      }
-
-      if (temp + size > SIZE_LIMIT) {
-        setState(() {
-          isLoading = false;
-        });
-        showDialog(
-          context: context,
-          builder: (BuildContext context) {
-            return AlertDialog(
-              title: const Text("File Size Limit Exceeded"),
-              content:
-                  const Text("The combined file size exceeds the 10MB limit."),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("OK"),
-                )
-              ],
-            );
-          },
-        );
-        return;
-      }
-
       List<FileData> newfiles = [];
       int newPageCount = 0;
       for (var file in result.files) {
@@ -243,10 +221,6 @@ class _UploadPageState extends State<UploadPage> {
                                 style: TextStyle(
                                     fontWeight: FontWeight.bold, fontSize: 20),
                               ),
-                              Text(
-                                'Combined size should be less than 10 MB',
-                                style: TextStyle(fontSize: 15),
-                              ),
                             ],
                           ),
                         ),
@@ -279,7 +253,9 @@ class _UploadPageState extends State<UploadPage> {
                                           style: const TextStyle(fontSize: 15),
                                         ),
                                         Text(
-                                          '${(files[index].size.toStringAsFixed(2))} MB',
+                                          files[index].pages == 1
+                                              ? '${(files[index].pages)} Page'
+                                              : '${(files[index].pages)} Pages',
                                           style: const TextStyle(fontSize: 10),
                                         ),
                                         Row(

@@ -12,9 +12,9 @@ class SettingsService {
           .doc('config')
           .get();
 
-      _liveOrdersEnabled = snapshot.data()?['liveOrdersEnabled'] ?? false;
+      _liveOrdersEnabled = snapshot.data()?['liveOrdersEnabled'] ?? true;
     } catch (e) {
-      _liveOrdersEnabled = false; // fallback
+      _liveOrdersEnabled = true; // fallback forced check remove
     }
   }
 }
