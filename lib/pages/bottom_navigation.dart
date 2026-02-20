@@ -33,13 +33,6 @@ class _MainScaffoldState extends State<MainScaffold> {
     _checkLoginStatus();
     _currentIndex = widget.selectedIndex;
     _loadUserDetails();
-
-    // ✅ Listen to Firebase Notification Tap and Foreground Message
-    NotificationPage.initializeFCM(context, () {
-      setState(() {
-        _currentIndex = 2; // index of NotificationPage
-      });
-    });
   }
 
   // 🔐 Check if user is logged in

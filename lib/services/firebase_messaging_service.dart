@@ -1,9 +1,11 @@
 import 'package:firebase_core/firebase_core.dart';
+import '../main.dart'; // ✅ Import main.dart to access navigatorKey
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'local_notification_store.dart';
 
 class FirebaseMessagingService {
   static final FirebaseMessaging _firebaseMessaging =
@@ -28,12 +30,18 @@ class FirebaseMessagingService {
       debugPrint('⚠️ Token or userPhone is null');
     }
 
-    // ✅ Init local notifications
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    
+    const androidInit =
+        AndroidInitializationSettings('@drawable/xeroxshoplogo');
     const initSettings = InitializationSettings(android: androidInit);
-    await _localNotifications.initialize(initSettings);
 
-    // ✅ Setup notification channel
+    await _localNotifications.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        navigatorKey.currentState?.pushNamed('/notifications');
+      },
+    );
+
     const channel = AndroidNotificationChannel(
       'channel_id',
       'Xerox Notifications',
@@ -51,6 +59,17 @@ class FirebaseMessagingService {
       final body = data['body'] ?? 'No body';
 
       if (title != 'No title' || body != 'No body') {
+        // ✅ Store notification locally
+        final item = NotificationItem(
+          title: title,
+          body: body,
+          timestamp: DateTime.now(),
+        );
+        await NotificationStorageService.addNotification(item);
+
+        // ✅ Notify UI to refresh (if NotificationPage is listening)
+        notificationStreamController.add(null);
+
         await _localNotifications.show(
           DateTime.now().millisecondsSinceEpoch ~/ 1000,
           title,
@@ -65,6 +84,11 @@ class FirebaseMessagingService {
           ),
         );
       }
+    });
+
+    // ✅ App opened from background by tapping notification (System Tray)
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      navigatorKey.currentState?.pushNamed('/notifications');
     });
 
     // ✅ Background/terminated state handler
@@ -95,4 +119,17 @@ class FirebaseMessagingService {
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('📩 [BG] ${message.data['title']}: ${message.data['body']}');
+
+  final data = message.data;
+  final title = data['title'] ?? 'No title';
+  final body = data['body'] ?? 'No body';
+
+  if (title != 'No title' || body != 'No body') {
+    final item = NotificationItem(
+      title: title,
+      body: body,
+      timestamp: DateTime.now(),
+    );
+    await NotificationStorageService.addNotification(item);
+  }
 }

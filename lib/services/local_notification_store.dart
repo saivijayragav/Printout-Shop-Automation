@@ -1,5 +1,10 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart'; // For debugPrint
+
+final StreamController<void> notificationStreamController =
+    StreamController<void>.broadcast();
 
 class NotificationItem {
   final String title;
@@ -31,25 +36,37 @@ class NotificationStorageService {
   static const _key = 'stored_notifications';
 
   static Future<void> addNotification(NotificationItem item) async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> stored = prefs.getStringList(_key) ?? [];
-    stored.add(jsonEncode(item.toMap()));
-    await prefs.setStringList(_key, stored);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String> stored = prefs.getStringList(_key) ?? [];
+      stored.add(jsonEncode(item.toMap()));
+      await prefs.setStringList(_key, stored);
+      debugPrint(
+          '✅ [Storage] Added notification: ${item.title}. Total: ${stored.length}');
+    } catch (e) {
+      debugPrint('❌ [Storage] Error adding notification: $e');
+    }
   }
 
   static Future<List<NotificationItem>> getNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String> stored = prefs.getStringList(_key) ?? [];
+      debugPrint('📂 [Storage] Retrieving ${stored.length} notifications');
+
+      final filtered =
+          stored.map((e) => NotificationItem.fromMap(jsonDecode(e))).toList();
+
+      return filtered;
+    } catch (e) {
+      debugPrint('❌ [Storage] Error retrieving notifications: $e');
+      return [];
+    }
+  }
+
+  static Future<void> clearNotifications() async {
     final prefs = await SharedPreferences.getInstance();
-    final List<String> stored = prefs.getStringList(_key) ?? [];
-
-    final now = DateTime.now();
-    final filtered = stored
-        .map((e) => NotificationItem.fromMap(jsonDecode(e)))
-        .where((n) => now.difference(n.timestamp).inHours < 24)
-        .toList();
-
-    final updated = filtered.map((n) => jsonEncode(n.toMap())).toList();
-    await prefs.setStringList(_key, updated);
-
-    return filtered;
+    await prefs.remove(_key);
+    debugPrint('🗑️ [Storage] Cleared notifications');
   }
 }
