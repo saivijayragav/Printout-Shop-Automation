@@ -17,10 +17,13 @@ public class PaidOrderController {
 
     private final   PaidOrderService orderService;
 
-    
+
 
     @GetMapping("/summary")
     public List<OrderSummaryDTO> getAdminOrders() {
+
+
+
         return orderService.getAllOrderSummaries();
     }
 

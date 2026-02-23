@@ -17,18 +17,15 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PaidOrderService {
-
+    
 
     private final ReturnPaidOrderRepository repo;
 
-    public List<OrderSummaryDTO> getAllOrderSummaries() {
+    public List<OrderSummaryDTO> getAllOrderSummaries(){
         return repo.findAllOrderSummaries();
     }
 
     private final PaidOrderRepository repository;
-
-
-
 
     // 2. Save Order (With Timestamp Fix)
     @Transactional
