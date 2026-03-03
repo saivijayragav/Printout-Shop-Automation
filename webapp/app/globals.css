@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* ── Tailwind v4 custom design tokens ── */
+@theme {
+  --color-background: #021526;
+  --color-foreground: #e2e8f0;
+  --color-card: #0A3353;
+  --color-card-foreground: #e2e8f0;
+  --color-accent: #6EACDA;
+  --color-accent-foreground: #021526;
+  --color-muted: #1a3a52;
+  --color-muted-foreground: #94a3b8;
+  --color-border: #1e4a6e;
+  --color-destructive: #f87171;
+}
+
+/* ── Raw CSS variables (for var() usage in custom styles) ── */
+:root {
+  --background: #021526;
+  --foreground: #e2e8f0;
+  --card: #0A3353;
+  --accent: #6EACDA;
+  --accent-foreground: #021526;
+  --muted: #1a3a52;
+  --muted-foreground: #94a3b8;
+  --border: #1e4a6e;
+  --destructive: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-poppins), system-ui, sans-serif;
+  min-height: 100dvh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--background); }
+::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
