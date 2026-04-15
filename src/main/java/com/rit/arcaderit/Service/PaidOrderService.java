@@ -25,9 +25,17 @@ public class PaidOrderService {
         return repo.findAllOrderSummaries();
     }
 
+    public List<OrderSummaryDTO> getProcessedOrderSummaries(){
+        return repo.findProcessedOrderSummaries();
+    }
+
+    public List<OrderSummaryDTO> getNotProcessedOrderSummaries(){
+        return repo.findNotProcessedOrderSummaries();
+    }
+
     private final PaidOrderRepository repository;
 
-    // 2. Save Order (With Timestamp Fix)
+    // Save Order (With Timestamp Fix)
     @Transactional
     public PaidOrder saveOrder(PaidOrderDTO dto) {
         // Convert File DTOs to Entities
@@ -42,7 +50,7 @@ public class PaidOrderService {
                 .sides(f.getSides())
                 .build()).collect(Collectors.toList());
 
-        // Build Order Entity
+        // Build Order Entity — processed defaults to false via @Builder.Default
         PaidOrder order = PaidOrder.builder()
                 .orderId(dto.getOrderId())
                 .totalPages(dto.getPages())
@@ -50,19 +58,51 @@ public class PaidOrderService {
                 .userName(dto.getUserName())
                 .phoneNumber(dto.getPhoneNumber())
                 .transactionId(dto.getTransactionId())
-
-                // ✅ CRITICAL FIX: Map the timestamp here!
-                // If dto.getTimestamp() is null (e.g., from old app version), default to NOW()
                 .timestamp(dto.getTimestamp() != null ? dto.getTimestamp() : LocalDateTime.now())
-
                 .files(fileEntities)
                 .build();
 
         return repository.save(order);
     }
 
+    /**
+     * Fetches order by orderId with a PESSIMISTIC_WRITE lock.
+     * - If the order is not yet processed, marks it as processed and returns it.
+     * - If the order is already processed, throws a RuntimeException (QR expired).
+     * - The pessimistic lock ensures concurrent scans on the same orderId are serialized.
+     */
+    @Transactional
     public PaidOrder getOrderDetails(String orderId) {
+        PaidOrder order = repository.findByOrderIdWithLock(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+
+        if (order.isProcessed()) {
+            throw new RuntimeException("QR code already scanned / expired for order: " + orderId);
+        }
+
+        // Mark as processed and save
+        order.setProcessed(true);
+        return repository.save(order);
+    }
+
+    @Transactional(readOnly = true)
+    public PaidOrder getOrderInfo(String orderId) {
         return repository.findByOrderId(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+    }
+
+    @Transactional
+    public void deleteOrder(String orderId) {
+        PaidOrder order = repository.findByOrderId(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+        repository.delete(order);
+    }
+
+    @Transactional
+    public PaidOrder restoreOrder(String orderId) {
+        PaidOrder order = repository.findByOrderId(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+        order.setProcessed(false);
+        return repository.save(order);
     }
 }

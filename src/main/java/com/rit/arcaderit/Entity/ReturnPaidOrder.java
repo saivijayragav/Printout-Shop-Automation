@@ -25,6 +25,10 @@ public class ReturnPaidOrder {
     private String phoneNumber;
     private String transactionId;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean processed = false;
+
     private LocalDateTime timestamp; // The timestamp field
 
     @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)

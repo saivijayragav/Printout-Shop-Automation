@@ -25,6 +25,10 @@ public class PaidOrder {
     private String phoneNumber;
     private String transactionId;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean processed = false;
+
     // ✅ Ensure this is LocalDateTime
     private LocalDateTime timestamp;
 

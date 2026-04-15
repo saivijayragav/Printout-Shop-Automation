@@ -15,4 +15,5 @@ public class OrderSummaryDTO {
     private String phoneNumber;   // 5. Match Query index 5
     private String transactionId; // 6. Match Query index 6
     private LocalDateTime timestamp;     // 7. Match Query index 7
+    private boolean processed;           // 8. Match Query index 8
 }

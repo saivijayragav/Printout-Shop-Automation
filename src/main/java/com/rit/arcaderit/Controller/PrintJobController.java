@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/print-jobs")
 @RequiredArgsConstructor
+@CrossOrigin("*")
+
 public class PrintJobController {
 
     private final PrintJobService printJobService;

@@ -14,6 +14,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/price")
 @RequiredArgsConstructor
+@CrossOrigin("*")
 public class PriceController {
 
     private final PriceCalculationService priceService;

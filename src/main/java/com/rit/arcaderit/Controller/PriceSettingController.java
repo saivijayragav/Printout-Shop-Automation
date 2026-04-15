@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/settings")
 @RequiredArgsConstructor
+@CrossOrigin("*")
+
 public class PriceSettingController {
 
     private final PriceSettingService service;
