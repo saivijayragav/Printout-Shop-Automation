@@ -83,3 +83,4 @@ app.*.map.json
 # e.g., ignore temporary editor files
 *.tmp
 *.swp
+assets/config/service-account.json 
