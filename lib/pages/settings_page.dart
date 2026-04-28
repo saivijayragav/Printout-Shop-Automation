@@ -16,7 +16,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
   final _formKey = GlobalKey<FormState>();
 
   // 🔁 CHANGE THIS IF NEEDED
-  final String baseUrl = "http://${dotenv.env['API_IP']}";
+  final String baseUrl = "${dotenv.env['API_IP']}";
 
   final ScrollController _scrollController = ScrollController();
 

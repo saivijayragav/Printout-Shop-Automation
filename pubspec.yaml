@@ -16,7 +16,6 @@ dependencies:
   cloud_firestore: ^6.0.2
   firebase_core: ^4.1.1
   flutter_cached_pdfview: ^0.4.3
-  # syncfusion_flutter_pdfviewer: ^23.1.38
   flutter_pdfview: ^1.4.0+1
   intl: ^0.20.2
   firebase_messaging: ^16.0.2
@@ -24,7 +23,6 @@ dependencies:
   googleapis_auth: ^1.6.0
   
   cloudflare_r2: ^0.0.13
-  syncfusion_flutter_pdfviewer: ^29.1.38
   printing: ^5.14.2
   win32: ^5.10.1
   crypto: ^3.0.6
@@ -32,6 +30,8 @@ dependencies:
   asn1lib: ^1.6.5
   basic_utils: ^5.8.2
   shared_preferences: ^2.2.2 
+
+
  
   
 

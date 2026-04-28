@@ -105,7 +105,7 @@ class PrinterChecker {
     return onlinePrinters.firstWhere((p) => p.name == winnerConfig.osPrinterName);
   }
 
-  /// 🚀 Execute Print
+  /// 🚀 Execute Print — INSTANT: fire-and-forget to OS spooler
   static Future<int> printJobAutomated({
     required Uint8List bytes,
     required bool isColor,
@@ -114,23 +114,22 @@ class PrinterChecker {
     required int documentPages,
     required String jobNamePrefix,
   }) async {
-    int jobsSent = 0;
     try {
       Printer targetPrinter = await _getBestPrinter(
         needsColor: isColor, needsDuplex: isDuplex, jobTotalPages: documentPages * copies,
       );
 
+      // 🚀 Fire ALL copies — NO AWAIT (OS print spooler handles queuing)
       for (int c = 0; c < copies; c++) {
-        await Printing.directPrintPdf(
-          printer: targetPrinter, 
+        Printing.directPrintPdf(
+          printer: targetPrinter,
           onLayout: (PdfPageFormat format) async => bytes,
-          name: '${jobNamePrefix}_Copy_${c+1}',
-          usePrinterSettings: true, 
+          name: '${jobNamePrefix}_Copy_${c + 1}',
+          usePrinterSettings: true,
         );
-        jobsSent++;
-        if (copies > 1 && c < copies - 1) await Future.delayed(const Duration(milliseconds: 1500));
       }
+
+      return copies;
     } catch (e) { rethrow; }
-    return jobsSent;
   }
 }

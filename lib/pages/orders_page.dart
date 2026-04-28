@@ -9,6 +9,9 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cloudflare_r2/cloudflare_r2.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+
 
 // Custom Imports
 import '../widgets/customappbar.dart';
@@ -30,18 +33,22 @@ class _OrdersPageState extends State<OrdersPage> {
   bool _isLoading = false;
   Map<String, dynamic>? _selectedOrder;
   String _printStatus = "";
-  
+  bool _isLoadingDetails = false;
   // Printer configs
   List<PrinterConfig> _availablePrinters = [];
   bool _isPrinterReady = false;
 
-  final String baseUrl = "http://${dotenv.env['API_IP']}/api/orders/summary";
+  // Per-file download/print progress tracking
+  final Map<String, double> _fileProgress = {};  // fileName -> 0.0 to 1.0
+  final Map<String, String> _fileStatus = {};    // fileName -> status text
 
-  // Cloudflare R2
-  static final accountId = dotenv.env['CLOUDFLARE_ACCOUNT_ID']!;
-  static final accessKeyId = dotenv.env['CLOUDFLARE_ACCESS_KEY']!;
-  static final secretAccessKey = dotenv.env['CLOUDFLARE_SECRET_KEY']!;
-  static final bucket = dotenv.env['CLOUDFLARE_BUCKET']!;
+  // Cloudflare Getters
+  String get baseUrl => "${dotenv.env['API_IP']}/api/orders/summary";
+  String get apiBase => "${dotenv.env['API_IP']}/api/orders";
+  String get accountId => dotenv.env['CLOUDFLARE_ACCOUNT_ID'] ?? '';
+  String get accessKeyId => dotenv.env['CLOUDFLARE_ACCESS_KEY'] ?? '';
+  String get secretAccessKey => dotenv.env['CLOUDFLARE_SECRET_KEY'] ?? '';
+  String get bucket => dotenv.env['CLOUDFLARE_BUCKET'] ?? '';
 
   @override
   void initState() {
@@ -53,9 +60,18 @@ class _OrdersPageState extends State<OrdersPage> {
 
   Future<void> _initCloudflare() async {
     try {
-      await CloudFlareR2.init(accountId: accountId, accessKeyId: accessKeyId, secretAccessKey: secretAccessKey);
+      if (accountId.isEmpty || accessKeyId.isEmpty) {
+        debugPrint("⚠️ WARNING: Cloudflare keys are empty! Check your .env file.");
+        return;
+      }
+      await CloudFlareR2.init(
+        accountId: accountId,
+        accessKeyId: accessKeyId,
+        secretAccessKey: secretAccessKey
+      );
+      debugPrint("✅ Cloudflare R2 Initialized Successfully.");
     } catch (e) {
-      debugPrint("Cloudflare Init Error: $e");
+      debugPrint("❌ Cloudflare Init Error: $e");
     }
   }
 
@@ -78,6 +94,45 @@ class _OrdersPageState extends State<OrdersPage> {
     if (value) refreshData();
   }
 
+  void _fetchOrderDetails(String orderId) async {
+    setState(() => _isLoadingDetails = true);
+    try {
+      debugPrint("📂 Fetching order details from API for: $orderId");
+
+      // Use backend API to get full order details with real file metadata
+      final response = await http.get(Uri.parse('$apiBase/info/$orderId'));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _selectedOrder = {
+              ...?_selectedOrder,
+              ...data,
+            };
+          });
+          debugPrint("✅ Order details loaded. Files: ${data['files']?.length ?? 0}");
+        }
+      } else {
+        debugPrint("❌ API returned ${response.statusCode}: ${response.body}");
+        if (mounted) {
+          setState(() {
+            _selectedOrder = {...?_selectedOrder, 'files': []};
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Exception fetching order details: $e");
+      if (mounted) {
+        setState(() {
+          _selectedOrder = {...?_selectedOrder, 'files': []};
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingDetails = false);
+    }
+  }
+
   Future<void> fetchOrdersFromApi() async {
     setState(() => _isLoading = true);
     try {
@@ -85,20 +140,23 @@ class _OrdersPageState extends State<OrdersPage> {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        
-        // Sort: Oldest first (Ascending)
+
+        // Sort: Newest first based on timestamp
         data.sort((a, b) {
            String tA = a['timestamp'] ?? '';
            String tB = b['timestamp'] ?? '';
-           return tA.compareTo(tB); 
+           return tB.compareTo(tA);
         });
 
         setState(() {
           _cachedOrders = data;
           _isLoading = false;
-          // Optionally auto-select the first order if none selected
           if (_selectedOrder == null && _cachedOrders.isNotEmpty) {
             _selectedOrder = _cachedOrders.first;
+            debugPrint("📋 First order selected: ${_selectedOrder!['orderId']}");
+            debugPrint("📄 Files in summary: ${_selectedOrder!['files']}");
+            // Try to fetch full details, but continue if it fails
+            _fetchOrderDetails(_selectedOrder!['orderId'].toString());
           } else if (_cachedOrders.isEmpty) {
             _selectedOrder = null;
           }
@@ -111,7 +169,7 @@ class _OrdersPageState extends State<OrdersPage> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("API Connection Error: $e"), backgroundColor: Colors.red),
+          const SnackBar(content: Text("API connection error. Check terminal logs."), backgroundColor: Colors.red),
         );
       }
     }
@@ -124,7 +182,7 @@ class _OrdersPageState extends State<OrdersPage> {
   String formatTimestamp(String? timestampStr) {
     if (timestampStr == null || timestampStr.isEmpty) return 'No Timestamp';
     try {
-      final DateTime dt = DateTime.parse(timestampStr);
+      final DateTime dt = DateTime.parse(timestampStr).toLocal();
       final DateTime now = DateTime.now();
       final bool isToday = dt.year == now.year && dt.month == now.month && dt.day == now.day;
       final DateTime yesterday = now.subtract(const Duration(days: 1));
@@ -136,7 +194,7 @@ class _OrdersPageState extends State<OrdersPage> {
       if (isYesterday) return "Yesterday, $timePart";
       return DateFormat('dd MMM yyyy, hh:mm a').format(dt);
     } catch (e) {
-      return timestampStr; 
+      return timestampStr;
     }
   }
 
@@ -198,13 +256,11 @@ class _OrdersPageState extends State<OrdersPage> {
             );
           }
         }
-        
+
         setState(() {
           _printStatus = "Printed / Done";
-          // If you need to hit an api to update status, do it here. 
-          // e.g. await http.put("$baseUrl/$orderId/status", ...)
         });
-        
+
         refreshData();
       } catch (e) {
         debugPrint("❌ markAsPrinted error: $e");
@@ -235,27 +291,201 @@ class _OrdersPageState extends State<OrdersPage> {
           refreshData();
         }
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Delete Failed: $e")));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Delete failed. Check terminal logs.")));
       }
     }
   }
 
-  // --- Printing & File Logic from OrderDetailsPage ---
+  // --- Cloudflare R2 Logic (Simplified) ---
+  Future<Uint8List?> _fetchFileBytesFromR2(dynamic fileSource, String orderIdStr) async {
+    final String rawName;
+    if (fileSource is Map) {
+      rawName = fileSource['name']?.toString() ?? '';
+    } else {
+      rawName = fileSource.toString();
+    }
 
-  Future<Uint8List?> _fetchFileBytesFromR2(String rawName, String orderIdStr) async {
-    final variants = {"$orderIdStr${rawName.trim()}", rawName.trim(), Uri.decodeFull(rawName.trim())};
+    final variants = {"", rawName.trim(), Uri.decodeFull(rawName.trim())};
+
     for (final name in variants) {
       try {
-        debugPrint("☁️ Fetching fresh file from server: $name");
+        debugPrint("☁️ Fetching from R2: $name");
         final bytes = await CloudFlareR2.getObject(bucket: bucket, objectName: name);
         if (bytes.isNotEmpty) {
-          return Uint8List.fromList(bytes); 
+          debugPrint("✅ Fetched: $name (${bytes.length} bytes)");
+          return Uint8List.fromList(bytes);
         }
-      } catch (e) { 
-        debugPrint("⚠️ Failed key: $name"); 
+      } catch (e) {
+        debugPrint("⚠️ Failed key: $name");
       }
     }
+    debugPrint("❌ All R2 keys failed for: $rawName");
     return null;
+  }
+
+  Future<Directory> _getCustomDownloadFolder() async {
+    Directory? downloadsDir;
+    try {
+      if (Platform.isWindows) {
+        downloadsDir = await getDownloadsDirectory();
+      } else {
+        downloadsDir = await getApplicationDocumentsDirectory();
+      }
+    } catch (e) {
+      downloadsDir = await getApplicationDocumentsDirectory();
+    }
+    downloadsDir ??= await getApplicationDocumentsDirectory();
+
+    final folder = Directory('${downloadsDir.path}${Platform.pathSeparator}rit xerox shop');
+    if (!await folder.exists()) await folder.create(recursive: true);
+    return folder;
+  }
+
+  String _cleanPathPart(String value, {String fallback = 'file.pdf'}) {
+    final cleaned = Uri.decodeFull(value.trim()).replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+    return cleaned.isEmpty ? fallback : cleaned;
+  }
+
+  Future<({File file, Uint8List bytes})?> _prepareLocalFile(dynamic fileSource, String orderIdStr) async {
+    final folder = await _getCustomDownloadFolder();
+    final cleanOrderId = _cleanPathPart(orderIdStr, fallback: 'unknown');
+    final orderFolder = Directory('${folder.path}${Platform.pathSeparator}$cleanOrderId');
+    if (!await orderFolder.exists()) await orderFolder.create(recursive: true);
+
+    final fileName = fileSource is Map ? (fileSource['name']?.toString() ?? '') : fileSource.toString();
+    final cleanNameLocal = _cleanPathPart(
+      fileName.split('/').last,
+      fallback: 'file_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
+    final file = File('${orderFolder.path}${Platform.pathSeparator}$cleanNameLocal');
+
+    if (await file.exists()) {
+      final existingBytes = await file.readAsBytes();
+      if (existingBytes.isNotEmpty) {
+        debugPrint("Cache hit: ${file.path}");
+        return (file: file, bytes: existingBytes);
+      }
+    }
+
+    final bytes = await _fetchFileBytesFromR2(fileSource, orderIdStr);
+    if (bytes == null || bytes.isEmpty) return null;
+
+    await file.writeAsBytes(bytes, flush: true);
+    if (await file.exists() && await file.length() > 0) {
+      debugPrint("Saved locally: ${file.path}");
+      return (file: file, bytes: bytes);
+    }
+    return null;
+  }
+
+  Future<void> _downloadFileOnly(dynamic fileSource, String orderIdStr) async {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("⏳ Downloading from Cloudflare..."), duration: Duration(seconds: 1)));
+
+    try {
+      final result = await _prepareLocalFile(fileSource, orderIdStr);
+      if (result == null) throw Exception("File not found in Cloudflare bucket.");
+
+      debugPrint("Download ready locally: ${result.file.path}");
+      if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Saved to: ${result.file.path}"), backgroundColor: Colors.green));
+          if (Platform.isWindows) Process.run('explorer.exe', ['/select,', result.file.path]);
+      }
+    } catch (e) {
+      debugPrint("Download failed: $e");
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download failed. Check terminal logs."), backgroundColor: Colors.red));
+    }
+  }
+
+  /// 🖨️ INSTANT silent print: Fetch from R2 → Fire all copies in parallel → Notify
+  Future<void> _printToSelectedPrinter(Map<String, dynamic> fileData, String orderIdStr, Printer selectedPrinter) async {
+    final rawName = fileData['name']?.toString() ?? '';
+    final int copies = int.tryParse(fileData['copies']?.toString() ?? '1') ?? 1;
+    final fileKey = '${orderIdStr}_$rawName';
+
+    // Show inline status
+    if (mounted) {
+      setState(() {
+        _fileProgress[fileKey] = 0.3;
+        _fileStatus[fileKey] = 'Fetching file...';
+      });
+    }
+
+    try {
+      // ☁️ STEP 1: Fetch bytes directly from R2 (no local storage)
+      debugPrint("📥 Fetching '$rawName' from R2...");
+      final bytes = await _fetchFileBytesFromR2(fileData, orderIdStr);
+
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _fileProgress.remove(fileKey);
+            _fileStatus[fileKey] = '❌ Download failed';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("❌ Failed to fetch file"), backgroundColor: Colors.red),
+          );
+        }
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) setState(() => _fileStatus.remove(fileKey));
+        });
+        return;
+      }
+
+      // Update progress
+      if (mounted) {
+        setState(() {
+          _fileProgress[fileKey] = 0.7;
+          _fileStatus[fileKey] = 'Sending $copies copy(s) to ${selectedPrinter.name}...';
+        });
+      }
+
+      // 🚀 STEP 2: Fire ALL copies — NO AWAIT (fire-and-forget to OS spooler)
+      debugPrint("🖨️ Sending $copies copies to ${selectedPrinter.name}...");
+      for (int c = 0; c < copies; c++) {
+        Printing.directPrintPdf(
+          printer: selectedPrinter,
+          onLayout: (PdfPageFormat format) async => bytes,
+          name: 'Job_${orderIdStr}_${rawName.split('/').last}_Copy_${c + 1}',
+          usePrinterSettings: true,
+        );
+      }
+
+      // ✅ STEP 3: Notify IMMEDIATELY (don't wait for print to finish)
+      debugPrint("✅ $copies job(s) dispatched to ${selectedPrinter.name}");
+      if (mounted) {
+        setState(() {
+          _fileProgress[fileKey] = 1.0;
+          _fileStatus[fileKey] = '✅ Sent $copies job(s) to ${selectedPrinter.name}';
+          _printStatus = "Queued to ${selectedPrinter.name}";
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("✅ Sent $copies job(s) to ${selectedPrinter.name}"), backgroundColor: Colors.green),
+        );
+      }
+
+      // Clear status after 5 seconds
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted) setState(() {
+          _fileStatus.remove(fileKey);
+          _fileProgress.remove(fileKey);
+        });
+      });
+
+    } catch (e) {
+      debugPrint("❌ Print failed for '$rawName': $e");
+      if (mounted) {
+        setState(() {
+          _fileProgress.remove(fileKey);
+          _fileStatus[fileKey] = '❌ Failed: $e';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("❌ Print failed: $e"), backgroundColor: Colors.redAccent),
+        );
+      }
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _fileStatus.remove(fileKey));
+      });
+    }
   }
 
   Future<void> _downloadAndSilentPrint(List<dynamic> files, String orderIdStr) async {
@@ -277,24 +507,33 @@ class _OrdersPageState extends State<OrdersPage> {
     try {
       int totalJobsSent = 0;
 
+      // Send all jobs in PARALLEL for maximum speed
+      final printFutures = <Future<int>>[];
+
       for (var fileData in files) {
         if (fileData is! Map) continue;
-        
+
         final rawName = fileData['name']?.toString() ?? '';
         final int copies = int.tryParse(fileData['copies']?.toString() ?? '1') ?? 1;
-        
+
         final String reqColor = fileData['color']?.toString().toLowerCase() ?? '';
         final bool isColorJob = reqColor.contains('color') || reqColor.contains('colour');
-        
+
         final String sides = fileData['sides']?.toString().toLowerCase() ?? '';
         final bool isDuplexJob = sides.contains('double') || sides.contains('back') || sides.contains('two');
 
         final String pagesStr = fileData['pages']?.toString() ?? fileData['pageCount']?.toString() ?? '1';
         final int documentPages = int.tryParse(pagesStr) ?? 1;
 
-        final bytes = await _fetchFileBytesFromR2(rawName, orderIdStr);
+        // Create async job (fetch from R2 + print — no local storage)
+        printFutures.add(() async {
+          debugPrint("📥 Fetching '$rawName' from R2...");
+          final bytes = await _fetchFileBytesFromR2(fileData, orderIdStr);
+          if (bytes == null || bytes.isEmpty) {
+            debugPrint("❌ Failed to fetch '$rawName' from R2");
+            return 0;
+          }
 
-        if (bytes != null && bytes.isNotEmpty) {
           int sent = await PrinterChecker.printJobAutomated(
             bytes: bytes,
             isColor: isColorJob,
@@ -303,27 +542,27 @@ class _OrdersPageState extends State<OrdersPage> {
             documentPages: documentPages,
             jobNamePrefix: 'Job_$orderIdStr',
           );
-          totalJobsSent += sent;
-        } else {
-          debugPrint("❌ Failed to fetch bytes from server for: $rawName");
-        }
+          debugPrint("✅ Sent $sent job(s) for '$rawName'");
+          return sent;
+        }());
       }
 
-      if (mounted) Navigator.pop(context); // Close loading dialog
+      // Wait for all parallel jobs to complete
+      final results = await Future.wait(printFutures, eagerError: false);
+      totalJobsSent = results.fold(0, (sum, sent) => sum + sent);
+
+      if (mounted) Navigator.pop(context);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Complete! Routed $totalJobsSent jobs directly from server."), backgroundColor: Colors.green));
-        setState(() {
-          _printStatus = "Pending / Queued to Printer";
-        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Complete! Routed $totalJobsSent jobs."), backgroundColor: Colors.green));
+        setState(() => _printStatus = "Pending / Queued to Printer");
       }
 
     } catch (e) {
       if (mounted && Navigator.canPop(context)) Navigator.of(context).pop();
-      String errorMessage = e.toString().replaceAll("Exception:", "").trim();
-
+      debugPrint("❌ Smart print failed: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("❌ $errorMessage"), backgroundColor: Colors.redAccent, duration: const Duration(seconds: 5)));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Print failed. Check terminal logs."), backgroundColor: Colors.redAccent));
       }
     }
   }
@@ -338,7 +577,7 @@ class _OrdersPageState extends State<OrdersPage> {
       backgroundColor: const Color(0xFFF5F7FA),
       body: Row(
         children: [
-          // LEFT PANEL: List of Orders (1/3 of width)
+          // LEFT PANEL
           Expanded(
             flex: 1,
             child: Container(
@@ -350,19 +589,19 @@ class _OrdersPageState extends State<OrdersPage> {
                 children: [
                    _buildLeftPanelHeader(),
                    Expanded(
-                     child: _isLoading 
-                        ? const Center(child: CircularProgressIndicator()) 
+                     child: _isLoading
+                        ? const Center(child: CircularProgressIndicator())
                         : _buildOrderList(),
                    )
                 ],
               ),
             ),
           ),
-          
-          // RIGHT PANEL: Order Details & Action (2/3 of width)
+
+          // RIGHT PANEL (Order Details Page/View)
           Expanded(
             flex: 2,
-            child: _selectedOrder == null 
+            child: _selectedOrder == null
               ? const Center(child: Text("Select an order from the list to view details", style: TextStyle(fontSize: 18, color: Colors.grey)))
               : _buildOrderDetailsView(),
           ),
@@ -409,7 +648,7 @@ class _OrdersPageState extends State<OrdersPage> {
     if (_cachedOrders.isEmpty) {
       return const Center(child: Text("No orders available."));
     }
-    
+
     return ListView.builder(
       itemCount: _cachedOrders.length,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -429,22 +668,27 @@ class _OrdersPageState extends State<OrdersPage> {
           margin: const EdgeInsets.only(bottom: 12),
           child: InkWell(
             onTap: () {
-              setState(() {
-                _selectedOrder = order;
-                _printStatus = ""; // reset local status
-              });
+              final String oid = order['orderId']?.toString() ?? 'N/A';
+              if (oid != 'N/A') {
+                debugPrint("📋 Order tapped: $oid");
+                setState(() {
+                  _selectedOrder = order;
+                  _printStatus = "";
+                });
+                // Always fetch fresh details when order is selected
+                _fetchOrderDetails(oid);
+              }
             },
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   // Order ID highlighted in bold
                    Text(
-                     orderId, 
+                     orderId,
                      style: TextStyle(
-                       fontSize: 24, 
-                       fontWeight: FontWeight.w900, 
+                       fontSize: 24,
+                       fontWeight: FontWeight.w900,
                        color: isSelected ? Colors.teal.shade800 : Colors.deepOrange.shade700
                      )
                    ),
@@ -468,19 +712,66 @@ class _OrdersPageState extends State<OrdersPage> {
     );
   }
 
-  // Right Panel UI
+  // --- ORDER DETAIL VIEW (Right Panel) ---
+
   Widget _buildOrderDetailsView() {
     final data = _selectedOrder!;
-    final files = data['files'] as List<dynamic>? ?? [];
     final orderIdStr = data['orderId']?.toString() ?? 'N/A';
-    
-    // Deduplicate files
+
+    debugPrint("🔍 Building Order Details View for Order: $orderIdStr");
+    debugPrint("📊 Data keys: ${data.keys.toList()}");
+    debugPrint("📄 Raw files data: ${data['files']}");
+    debugPrint("📄 Raw files type: ${data['files'].runtimeType}");
+
+    // Extracting files reliably
+    List<dynamic> files = [];
+    try {
+      if (data['files'] != null) {
+        if (data['files'] is String && (data['files'] as String).isNotEmpty) {
+          debugPrint("🔄 Files is String, attempting to decode...");
+          files = json.decode(data['files']);
+          debugPrint("✅ Successfully decoded files from String: ${files.length} items");
+        } else if (data['files'] is List) {
+          files = List.from(data['files']);
+          debugPrint("✅ Files is already a List: ${files.length} items");
+        } else if (data['files'] is Map) {
+          // If files is a single map, wrap it in a list
+          files = [data['files']];
+          debugPrint("✅ Files is a Map, wrapped in list");
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Error processing files: $e");
+      files = [];
+    }
+
+    debugPrint("📊 Extracted files count: ${files.length}");
+    if (files.isNotEmpty) {
+      debugPrint("📄 First file: ${files.first}");
+    }
+
+    // Deduplicate files safely to prevent duplicates in UI
     final seen = <String>{};
     final uniqueFiles = files.where((file) {
+      if (file is! Map) {
+        debugPrint("⚠️ Skipping non-Map file: $file");
+        return false;
+      }
       final name = file['name']?.toString() ?? '';
-      if (seen.contains(name)) return false;
-      seen.add(name); return true;
+      if (name.isEmpty) {
+        debugPrint("⚠️ Skipping file with empty name");
+        return false;
+      }
+      if (seen.contains(name)) {
+        debugPrint("⚠️ Skipping duplicate file: $name");
+        return false;
+      }
+      seen.add(name);
+      debugPrint("✅ Including file: $name");
+      return true;
     }).toList();
+
+    debugPrint("📊 Unique files count: ${uniqueFiles.length}");
 
     return Padding(
       padding: const EdgeInsets.all(20.0),
@@ -499,40 +790,15 @@ class _OrdersPageState extends State<OrdersPage> {
              ]
            ),
            const Divider(thickness: 2),
-           
-           // Status & Print Chip Row
-           Wrap(
-             spacing: 12,
-             runSpacing: 10,
-             crossAxisAlignment: WrapCrossAlignment.center,
-             children: [
-               if (_printStatus.isNotEmpty) 
-                 Chip(
-                   label: Text(_printStatus, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                   backgroundColor: _printStatus.contains('Done') ? Colors.green : Colors.amber.shade800,
-                 ),
-               
-               // Show available printer chips
-               if (_availablePrinters.isNotEmpty)
-                 ..._availablePrinters.map((p) => ActionChip(
-                   avatar: const Icon(Icons.print, size: 16, color: Colors.white),
-                   label: Text("Smart Print (${p.osPrinterName})", style: const TextStyle(color: Colors.white)),
-                   backgroundColor: Colors.blueAccent,
-                   onPressed: () => _downloadAndSilentPrint(uniqueFiles, orderIdStr),
-                 )).toList()
-               else
-                 ActionChip(
-                   avatar: const Icon(Icons.warning, size: 16, color: Colors.white),
-                   label: const Text("No Printer Configured", style: TextStyle(color: Colors.white)),
-                   backgroundColor: Colors.redAccent,
-                   onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrinterSetupPage())).then((_) => _loadPrinters()),
-                 ),
-             ],
-           ),
-           
+
+           if (_printStatus.isNotEmpty)
+             Chip(
+               label: Text(_printStatus, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+               backgroundColor: _printStatus.contains('Done') ? Colors.green : Colors.amber.shade800,
+             ),
+
            const SizedBox(height: 20),
-           
-           // Customer Info Block
+
            Container(
              padding: const EdgeInsets.all(16),
              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.teal.shade200)),
@@ -541,29 +807,32 @@ class _OrdersPageState extends State<OrdersPage> {
                children: [
                  const Text("Customer Information", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.teal)),
                  const SizedBox(height: 10),
+
+                 // UPDATED to map correctly to your JSON response
                  _buildInfoRow('Name', data['userName']),
                  _buildInfoRow('Mobile Number', data['phoneNumber']),
-                 _buildInfoRow('Price', data['price'] != null ? '₹${data['price']}' : 'N/A'),
-                 _buildInfoRow('Time', formatTimestamp(data['timestamp'])),
+                 _buildInfoRow('Total Pages', data['totalPages']?.toString()),
+                 _buildInfoRow('Total Price', data['totalPrice'] != null ? '₹${data['totalPrice']}' : 'N/A'),
+                 _buildInfoRow('Date & Time', formatTimestamp(data['timestamp'])),
                ],
              ),
            ),
            const SizedBox(height: 24),
-           
-           // Document Details Block (List of Items)
+
            const Text("Documents", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.teal)),
            const SizedBox(height: 10),
-           
+
            Expanded(
-             child: uniqueFiles.isEmpty 
-               ? const Text("No files requested.")
-               : ListView.builder(
-                   itemCount: uniqueFiles.length,
-                   itemBuilder: (context, idx) => _buildFileSummaryBox(uniqueFiles[idx] as Map<String, dynamic>),
-                 )
+             child: _isLoadingDetails
+               ? const Center(child: CircularProgressIndicator())
+               : uniqueFiles.isEmpty
+                 ? const Center(child: Text("No documents found for this order", style: TextStyle(color: Colors.grey, fontSize: 16)))
+                 : ListView.builder(
+                     itemCount: uniqueFiles.length,
+                     itemBuilder: (context, idx) => _buildFileSummaryBox(uniqueFiles[idx] as Map<String, dynamic>, orderIdStr),
+                   )
            ),
-           
-           // Action Buttons at Bottom
+
            Container(
              padding: const EdgeInsets.only(top: 16),
              child: Row(
@@ -606,18 +875,120 @@ class _OrdersPageState extends State<OrdersPage> {
     );
   }
 
-  Widget _buildFileSummaryBox(Map<String, dynamic> fileData) {
+  /// Preview a PDF file in a dialog
+  Future<void> _previewFile(dynamic fileSource, String orderIdStr) async {
+    final rawName = fileSource is Map ? fileSource['name']?.toString() ?? '' : fileSource.toString();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+
+    try {
+      final bytes = await _fetchFileBytesFromR2(fileSource, orderIdStr);
+      if (mounted) Navigator.pop(context); // close loading
+
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("❌ Could not fetch file for preview"), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+
+      final lowerName = rawName.toLowerCase();
+      final isPdf = lowerName.endsWith('.pdf');
+      final isImage = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png');
+
+      if (!mounted) return;
+
+      if (isPdf) {
+        showDialog(
+          context: context,
+          builder: (ctx) => Dialog(
+            insetPadding: const EdgeInsets.all(20),
+            child: SizedBox(
+              width: MediaQuery.of(ctx).size.width * 0.8,
+              height: MediaQuery.of(ctx).size.height * 0.85,
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    color: Colors.indigo,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(Uri.decodeFull(rawName.split('/').last), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: PdfPreview(
+                      build: (_) async => bytes,
+                      allowPrinting: false,
+                      allowSharing: false,
+                      canChangeOrientation: false,
+                      canChangePageFormat: false,
+                      canDebug: false,
+                      useActions: false,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      } else if (isImage) {
+        showDialog(
+          context: context,
+          builder: (ctx) => Dialog(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppBar(
+                  title: Text(Uri.decodeFull(rawName.split('/').last)),
+                  automaticallyImplyLeading: false,
+                  actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx))],
+                ),
+                Image.memory(bytes, fit: BoxFit.contain),
+              ],
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Preview not supported for this file type. Use Download instead.")),
+        );
+      }
+    } catch (e) {
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      debugPrint("❌ Preview error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Preview failed. Check terminal logs."), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Widget _buildFileSummaryBox(Map<String, dynamic> fileData, String orderIdStr) {
     final rawName = fileData['name']?.toString() ?? '';
     final fileName = Uri.decodeFull(rawName.trim()).replaceAll('%20', ' ');
     final String pages = fileData['pages']?.toString() ?? fileData['pageCount']?.toString() ?? 'N/A';
+    final fileKey = '${orderIdStr}_$rawName';
+    final double? progress = _fileProgress[fileKey];
+    final String? status = _fileStatus[fileKey];
+    final bool isProcessing = progress != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.blueGrey.shade50,
+        color: isProcessing ? Colors.blue.shade50 : Colors.blueGrey.shade50,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blueGrey.shade100)
+        border: Border.all(color: isProcessing ? Colors.blue.shade300 : Colors.blueGrey.shade100)
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -636,6 +1007,128 @@ class _OrdersPageState extends State<OrdersPage> {
                Expanded(child: _buildInfoRow("Copies", fileData['copies']?.toString())),
             ],
           ),
+
+          // Inline progress bar (shown during download/print)
+          if (isProcessing || status != null) ...[
+            const SizedBox(height: 10),
+            if (isProcessing)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 8,
+                  backgroundColor: Colors.grey.shade300,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    progress! >= 1.0 ? Colors.green : Colors.blue,
+                  ),
+                ),
+              ),
+            if (status != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  status,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: status.contains('Done') ? Colors.green.shade700
+                         : status.contains('Failed') ? Colors.red.shade700
+                         : Colors.blue.shade700,
+                  ),
+                ),
+              ),
+            if (isProcessing)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '${(progress * 100).toInt()}%',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade800),
+                ),
+              ),
+          ],
+
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Preview button
+              ElevatedButton.icon(
+                icon: const Icon(Icons.visibility, size: 18),
+                label: const Text("Preview"),
+                onPressed: isProcessing ? null : () => _previewFile(fileData, orderIdStr),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade100,
+                  foregroundColor: Colors.blue.shade800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Download button
+              ElevatedButton.icon(
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text("Download"),
+                onPressed: isProcessing ? null : () => _downloadFileOnly(fileData, orderIdStr),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple.shade100,
+                  foregroundColor: Colors.deepPurple,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Print to specific printer button
+              ElevatedButton.icon(
+                icon: const Icon(Icons.print, size: 18),
+                label: const Text("Choose Printer"),
+                onPressed: isProcessing ? null : () => _showPrinterSelectionDialog(fileData, orderIdStr),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal.shade100,
+                  foregroundColor: Colors.teal.shade800,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show dialog listing available printers for user to pick one
+  void _showPrinterSelectionDialog(Map<String, dynamic> fileData, String orderIdStr) async {
+    final systemPrinters = await Printing.listPrinters();
+    final availablePrinters = systemPrinters.where((p) => p.isAvailable).toList();
+
+    if (!mounted) return;
+
+    if (availablePrinters.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("❌ No printers available"), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Select Printer"),
+        content: SizedBox(
+          width: 400,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: availablePrinters.length,
+            itemBuilder: (_, i) {
+              final printer = availablePrinters[i];
+              return ListTile(
+                leading: Icon(Icons.print, color: printer.isDefault ? Colors.green : Colors.grey),
+                title: Text(printer.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(printer.isDefault ? "Default Printer" : "Available"),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _printToSelectedPrinter(fileData, orderIdStr, printer);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
         ],
       ),
     );

@@ -8,10 +8,11 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloudflare_r2/cloudflare_r2.dart';
+import 'package:printing/printing.dart';
 
-// 🔌 Services & Config Page Import
-import '../Service/printer_check.dart'; 
-import 'printer_setup_page.dart'; // Ensure the path points to your Setup UI
+// Services & Config Page Import
+import '../Service/printer_check.dart';
+import 'printer_setup_page.dart';
 
 class OrderDetailPage extends StatefulWidget {
   final Map<String, dynamic> orderData;
@@ -26,7 +27,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   bool hasError = false;
   late Map<String, dynamic> _orderDetails;
 
-  // 🔐 Environment Variables
+  // 🔐 Environment Variables (same pattern as old working code)
   static final accountId = dotenv.env['CLOUDFLARE_ACCOUNT_ID']!;
   static final accessKeyId = dotenv.env['CLOUDFLARE_ACCESS_KEY']!;
   static final secretAccessKey = dotenv.env['CLOUDFLARE_SECRET_KEY']!;
@@ -88,35 +89,401 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         downloadsDir = await getApplicationDocumentsDirectory();
       }
     } catch (e) {
-      downloadsDir = await getApplicationDocumentsDirectory();
+      debugPrint("⚠️ getDownloadsDirectory failed: $e");
     }
     downloadsDir ??= await getApplicationDocumentsDirectory();
 
-    final folder = Directory('${downloadsDir.path}\\RIT_XeroxShop');
-    if (!await folder.exists()) await folder.create(recursive: true);
+    // Ensure no trailing separator before adding ours
+    String basePath = downloadsDir.path;
+    while (basePath.endsWith('\\') || basePath.endsWith('/')) {
+      basePath = basePath.substring(0, basePath.length - 1);
+    }
+
+    final folder = Directory('$basePath${Platform.pathSeparator}rit xerox shop');
+    await folder.create(recursive: true);
+    debugPrint("📂 Final download folder: ${folder.path}");
     return folder;
   }
 
-  // 🧠 NEW: Fetch directly into memory from the Server (Bypass Local Folder)
+  // ☁️ Fetch file bytes from Cloudflare R2 (same pattern as old working code)
   Future<Uint8List?> _fetchFileBytesFromR2(String rawName) async {
     final orderId = _orderDetails['orderId']?.toString() ?? _orderDetails['orderID']?.toString() ?? "";
     final variants = {"$orderId${rawName.trim()}", rawName.trim(), Uri.decodeFull(rawName.trim())};
 
     for (final name in variants) {
       try {
-        debugPrint("☁️ Fetching fresh file from server: $name");
+        debugPrint("☁️ Fetching from R2: $name");
         final bytes = await CloudFlareR2.getObject(bucket: bucket, objectName: name);
         if (bytes.isNotEmpty) {
-          return Uint8List.fromList(bytes); // Return directly to RAM
+          debugPrint("✅ Fetched: $name");
+          return Uint8List.fromList(bytes);
         }
-      } catch (e) { 
-        debugPrint("⚠️ Failed key: $name"); 
+      } catch (e) {
+        debugPrint("⚠️ Failed key: $name");
       }
     }
+    debugPrint("❌ All R2 keys failed for: $rawName");
     return null;
   }
 
-  // 🔥 UPDATED MAIN FUNCTION: Prints strictly from downloaded memory bytes
+  // 🔍 Check if file exists locally without downloading
+  Future<({File file, Uint8List bytes})?> _getLocalFileIfExists(String rawName) async {
+    try {
+      String orderId = _orderDetails['orderId']?.toString() ?? 'unknown';
+      orderId = orderId.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+
+      String cleanName = rawName.split('/').last;
+      cleanName = Uri.decodeFull(cleanName.trim()).replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+      if (cleanName.isEmpty) cleanName = 'file_${DateTime.now().millisecondsSinceEpoch}.pdf';
+
+      final folder = await _getCustomDownloadFolder();
+      final orderFolder = Directory('${folder.path}${Platform.pathSeparator}$orderId');
+      final file = File('${orderFolder.path}${Platform.pathSeparator}$cleanName');
+
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        if (bytes.isNotEmpty) {
+          debugPrint("⚡ Local file found: ${file.path}");
+          return (file: file, bytes: bytes);
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint("❌ Error checking local file: $e");
+      return null;
+    }
+  }
+
+  // 💾 Download file to local disk and return (filePath, bytes)
+  Future<({File file, Uint8List bytes})?> _downloadToLocal(String rawName) async {
+    try {
+      debugPrint("💾 Preparing to save: $rawName");
+
+      final folder = await _getCustomDownloadFolder();
+
+      // Sanitize orderId for folder name
+      String orderId = _orderDetails['orderId']?.toString() ?? 'unknown';
+      orderId = orderId.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+
+      final orderFolder = Directory('${folder.path}${Platform.pathSeparator}$orderId');
+      await orderFolder.create(recursive: true);
+
+      // Sanitize filename
+      String cleanName = rawName.split('/').last;
+      cleanName = Uri.decodeFull(cleanName.trim()).replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+      if (cleanName.isEmpty) cleanName = 'file_${DateTime.now().millisecondsSinceEpoch}.pdf';
+
+      final file = File('${orderFolder.path}${Platform.pathSeparator}$cleanName');
+
+      // 🧠 Check Cache
+      if (await file.exists()) {
+        final existingBytes = await file.readAsBytes();
+        if (existingBytes.isNotEmpty) {
+          debugPrint("⚡ Cache hit: ${file.path}");
+          return (file: file, bytes: existingBytes);
+        }
+      }
+
+      // ☁️ Fetch
+      final bytes = await _fetchFileBytesFromR2(rawName);
+      if (bytes == null || bytes.isEmpty) {
+        debugPrint("❌ Failed to fetch bytes for: $rawName");
+        return null;
+      }
+
+      // 💾 Save & Verify
+      await file.writeAsBytes(bytes, flush: true);
+
+      if (await file.exists() && (await file.length()) > 0) {
+        debugPrint("✅ Saved successfully: ${file.path}");
+        return (file: file, bytes: bytes);
+      } else {
+        debugPrint("❌ Save failed verification: ${file.path}");
+        return null;
+      }
+    } catch (e, stack) {
+      debugPrint("❌ _downloadToLocal error: $e\n$stack");
+      return null;
+    }
+  }
+
+  // 💾 Download-only action (button)
+  Future<void> _downloadFileOnly(String rawName) async {
+    try {
+      final result = await _downloadToLocal(rawName);
+      if (result == null) throw Exception("Failed to fetch file from server.");
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Saved to: ${result.file.path}")));
+        if (Platform.isWindows) Process.run('explorer.exe', ['/select,', result.file.path]);
+      }
+    } catch (e) {
+      debugPrint("Download Error: $e");
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("❌ Download failed: $e"), backgroundColor: Colors.red));
+    }
+  }
+
+  // 👁️ Preview PDF/Image file in a dialog
+  Future<void> _previewFile(String rawName) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+
+    try {
+      final bytes = await _fetchFileBytesFromR2(rawName);
+      if (mounted) Navigator.pop(context);
+
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("❌ Could not fetch file for preview"), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+
+      final lowerName = rawName.toLowerCase();
+      final isPdf = lowerName.endsWith('.pdf');
+      final isImage = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png');
+
+      if (!mounted) return;
+
+      if (isPdf) {
+        showDialog(
+          context: context,
+          builder: (ctx) => Dialog(
+            insetPadding: const EdgeInsets.all(20),
+            child: SizedBox(
+              width: MediaQuery.of(ctx).size.width * 0.8,
+              height: MediaQuery.of(ctx).size.height * 0.85,
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    color: Colors.indigo,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(Uri.decodeFull(rawName.split('/').last), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis)),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: PdfPreview(
+                      build: (_) async => bytes,
+                      allowPrinting: false,
+                      allowSharing: false,
+                      canChangeOrientation: false,
+                      canChangePageFormat: false,
+                      canDebug: false,
+                      useActions: false,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      } else if (isImage) {
+        showDialog(
+          context: context,
+          builder: (ctx) => Dialog(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppBar(
+                  title: Text(Uri.decodeFull(rawName.split('/').last)),
+                  automaticallyImplyLeading: false,
+                  actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx))],
+                ),
+                Image.memory(bytes, fit: BoxFit.contain),
+              ],
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Preview not supported for this file type. Use Download instead.")),
+        );
+      }
+    } catch (e) {
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      debugPrint("❌ Preview error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("❌ Preview failed: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // 🖨️ Print to a specific printer chosen by the user
+  // OPTIMIZED: Local cache first → fetch R2 only if missing → parallel print + save
+  Future<void> _printToSelectedPrinter(String rawName, int copies, Printer selectedPrinter) async {
+    try {
+      final lowerName = rawName.toLowerCase();
+      if (!lowerName.endsWith('.pdf')) throw Exception("Only PDF files can be printed.");
+
+      // Show quick notification (not blocking)
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Sending to printer..."),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+
+      // SEND IMMEDIATELY - Don't wait for anything
+      unawaited(_performPrintJob(rawName, copies, selectedPrinter));
+
+    } catch (e) {
+      debugPrint("❌ Print error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ Error: $e"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  // 🚀 Background print job — INSTANT: cache-first, parallel copies, background save
+  Future<void> _performPrintJob(String rawName, int copies, Printer selectedPrinter) async {
+    try {
+      Uint8List? bytes;
+
+      // ⚡ STEP 1: Check local cache FIRST (instant if cached)
+      final localResult = await _getLocalFileIfExists(rawName);
+      if (localResult != null) {
+        bytes = localResult.bytes;
+        debugPrint("⚡ Cache hit — printing instantly!");
+      } else {
+        // ☁️ STEP 2: Fetch from R2 only if not cached
+        debugPrint("📥 Cache miss — fetching from R2...");
+        bytes = await _fetchFileBytesFromR2(rawName);
+        if (bytes == null || bytes.isEmpty) throw Exception("Failed to fetch file");
+        debugPrint("✅ Fetched: ${bytes.length} bytes");
+
+        // 💾 STEP 3: Save to local folder in BACKGROUND (don't block printing)
+        unawaited(_saveToLocalInBackground(rawName, bytes));
+      }
+
+      // 🚀 STEP 4: Fire ALL copies — NO AWAIT (fire-and-forget to OS spooler)
+      final jobName = 'Job_${_orderDetails['orderId']}_${rawName.split('/').last}';
+      for (int c = 0; c < copies; c++) {
+        Printing.directPrintPdf(
+          printer: selectedPrinter,
+          onLayout: (_) => Future.value(bytes),
+          name: '$jobName Copy ${c + 1}',
+          usePrinterSettings: true,
+        );
+      }
+
+      debugPrint("✅ All $copies jobs sent!");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("✅ $copies job(s) sent to printer"),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+    } catch (e) {
+      debugPrint("❌ Print error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ Error: $e"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  // 💾 Save bytes to local folder in background (never blocks caller)
+  Future<void> _saveToLocalInBackground(String rawName, Uint8List bytes) async {
+    try {
+      final folder = await _getCustomDownloadFolder();
+      String orderId = _orderDetails['orderId']?.toString() ?? 'unknown';
+      orderId = orderId.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+      final orderFolder = Directory('${folder.path}${Platform.pathSeparator}$orderId');
+      await orderFolder.create(recursive: true);
+
+      String cleanName = rawName.split('/').last;
+      cleanName = Uri.decodeFull(cleanName.trim()).replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+      if (cleanName.isEmpty) cleanName = 'file_${DateTime.now().millisecondsSinceEpoch}.pdf';
+
+      final file = File('${orderFolder.path}${Platform.pathSeparator}$cleanName');
+      if (!await file.exists()) {
+        await file.writeAsBytes(bytes, flush: true);
+        debugPrint("💾 Background save complete: ${file.path}");
+      }
+    } catch (e) {
+      debugPrint("⚠️ Background save failed (non-critical): $e");
+    }
+  }
+
+  // 🖨️ Show printer selection dialog
+  void _showPrinterSelectionDialog(Map<String, dynamic> fileData) async {
+    final systemPrinters = await Printing.listPrinters();
+    final availablePrinters = systemPrinters.where((p) => p.isAvailable).toList();
+
+    if (!mounted) return;
+
+    if (availablePrinters.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("❌ No printers available"), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final rawName = fileData['name']?.toString() ?? '';
+    final int copies = int.tryParse(fileData['copies']?.toString() ?? '1') ?? 1;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Select Printer"),
+        content: SizedBox(
+          width: 400,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: availablePrinters.length,
+            itemBuilder: (_, i) {
+              final printer = availablePrinters[i];
+              return ListTile(
+                leading: Icon(Icons.print, color: printer.isDefault ? Colors.green : Colors.grey),
+                title: Text(printer.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(printer.isDefault ? "Default Printer" : "Available"),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _printToSelectedPrinter(rawName, copies, printer);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+        ],
+      ),
+    );
+  }
+
+  // 🔥 Smart Route & Print all files
+  // OPTIMIZED: Fetch → Send immediately in parallel (fastest!)
   Future<void> _downloadAndSilentPrint(List<dynamic> files) async {
     showDialog(
       context: context,
@@ -126,8 +493,8 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 10),
-            Text("Fetching & Routing Smart Job...", style: TextStyle(color: Colors.white, decoration: TextDecoration.none, fontSize: 14))
+            SizedBox(height: 8),
+            Text("Sending Jobs to Printers...", style: TextStyle(color: Colors.white, decoration: TextDecoration.none, fontSize: 13))
           ],
         ),
       ),
@@ -136,78 +503,107 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     try {
       int totalJobsSent = 0;
 
+      // Send all jobs in parallel for maximum speed
+      final printFutures = <Future<int>>[];
+
       for (var fileData in files) {
         if (fileData is! Map) continue;
-        
+
         final rawName = fileData['name']?.toString() ?? '';
         final int copies = int.tryParse(fileData['copies']?.toString() ?? '1') ?? 1;
-        
-        // 🧠 Extract Requirements
         final String reqColor = fileData['color']?.toString().toLowerCase() ?? '';
         final bool isColorJob = reqColor.contains('color') || reqColor.contains('colour');
-        
         final String sides = fileData['sides']?.toString().toLowerCase() ?? '';
         final bool isDuplexJob = sides.contains('double') || sides.contains('back') || sides.contains('two');
-
         final String pagesStr = fileData['pages']?.toString() ?? fileData['pageCount']?.toString() ?? '1';
         final int documentPages = int.tryParse(pagesStr) ?? 1;
 
-        // 1. FETCH EXACT FILE DIRECTLY INTO MEMORY (No Folder Checks)
-        final bytes = await _fetchFileBytesFromR2(rawName);
-
-        // 2. SEND TO SMART ROUTER
-        if (bytes != null && bytes.isNotEmpty) {
-          int sent = await PrinterChecker.printJobAutomated(
-            bytes: bytes,
-            isColor: isColorJob,
-            isDuplex: isDuplexJob,
-            copies: copies,
-            documentPages: documentPages,
-            jobNamePrefix: 'Job_${_orderDetails['orderId']}',
-          );
-          totalJobsSent += sent;
-        } else {
-          debugPrint("❌ Failed to fetch bytes from server for: $rawName");
-        }
+        // Create async job for each file
+        final jobFuture = _sendJobToSmartPrinter(
+          rawName: rawName,
+          copies: copies,
+          isColorJob: isColorJob,
+          isDuplexJob: isDuplexJob,
+          documentPages: documentPages,
+        );
+        printFutures.add(jobFuture);
       }
 
-      if (mounted) Navigator.pop(context); // Close loading dialog
+      // Wait for all jobs to complete
+      final results = await Future.wait(printFutures, eagerError: false);
+      totalJobsSent = results.fold(0, (sum, sent) => sum + sent);
+
+      if (mounted) Navigator.pop(context);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Complete! Routed $totalJobsSent jobs directly from server."), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("✅ Sent $totalJobsSent job(s) to printers"),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
 
     } catch (e) {
       if (mounted && Navigator.canPop(context)) Navigator.of(context).pop();
       String errorMessage = e.toString().replaceAll("Exception:", "").trim();
-
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("❌ $errorMessage"), backgroundColor: Colors.redAccent, duration: const Duration(seconds: 5)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ $errorMessage"),
+            backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 5),
+          ),
+        );
       }
     }
   }
 
-  // 💾 "Download Only" Button - Explicitly writes the fetched memory to disk
-  Future<void> _downloadFileOnly(String rawName) async {
+  // 🔥 Send single job to smart router — cache-first, parallel, background save
+  Future<int> _sendJobToSmartPrinter({
+    required String rawName,
+    required int copies,
+    required bool isColorJob,
+    required bool isDuplexJob,
+    required int documentPages,
+  }) async {
     try {
-      final bytes = await _fetchFileBytesFromR2(rawName);
-      if (bytes == null || bytes.isEmpty) throw Exception("Failed to fetch file from server.");
+      Uint8List? bytes;
 
-      final folder = await _getCustomDownloadFolder();
-      String cleanNameLocal = rawName.split('/').last; 
-      cleanNameLocal = Uri.decodeFull(cleanNameLocal.trim()).replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-      
-      final file = File('${folder.path}\\$cleanNameLocal');
-      await file.writeAsBytes(bytes, flush: true);
-
-      if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Saved to: ${file.path}")));
-          // Highlight the specific file in Windows Explorer
-          if (Platform.isWindows) Process.run('explorer.exe', ['/select,', file.path]);
+      // ⚡ STEP 1: Check local cache FIRST (instant if cached)
+      final localResult = await _getLocalFileIfExists(rawName);
+      if (localResult != null) {
+        bytes = localResult.bytes;
+        debugPrint("⚡ Cache hit for: $rawName");
+      } else {
+        // ☁️ STEP 2: Fetch from R2 only if not cached
+        debugPrint("📥 Cache miss, fetching: $rawName");
+        bytes = await _fetchFileBytesFromR2(rawName);
+        if (bytes == null || bytes.isEmpty) {
+          debugPrint("❌ Failed to fetch: $rawName");
+          return 0;
+        }
+        // 💾 Save in background (don't block printing)
+        unawaited(_saveToLocalInBackground(rawName, bytes));
       }
-    } catch (e) { 
-      debugPrint("Download Error: $e"); 
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("❌ Download failed: $e"), backgroundColor: Colors.red));
+
+      // 🔥 STEP 3: Send to smart router immediately
+      debugPrint("🔥 Routing $rawName to printer...");
+      int sent = await PrinterChecker.printJobAutomated(
+        bytes: bytes,
+        isColor: isColorJob,
+        isDuplex: isDuplexJob,
+        copies: copies,
+        documentPages: documentPages,
+        jobNamePrefix: 'Job_${_orderDetails['orderId']}',
+      );
+
+      debugPrint("✅ Job sent: $rawName ($sent copies)");
+      return sent;
+    } catch (e) {
+      debugPrint("❌ Job error: $rawName - $e");
+      return 0;
     }
   }
 
@@ -241,10 +637,30 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           buildDetailBox("Binding", fileData['binding']),
           buildDetailBox("Copies", fileData['copies']?.toString()),
           const SizedBox(height: 8),
-          Center(
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.download), label: const Text("Download Only"), onPressed: () => _downloadFileOnly(rawName), style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple.shade100, foregroundColor: Colors.deepPurple),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.visibility, size: 18),
+                label: const Text("Preview"),
+                onPressed: () => _previewFile(rawName),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade100, foregroundColor: Colors.blue.shade800),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text("Download"),
+                onPressed: () => _downloadFileOnly(rawName),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple.shade100, foregroundColor: Colors.deepPurple),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.print, size: 18),
+                label: const Text("Choose Printer"),
+                onPressed: () => _showPrinterSelectionDialog(fileData),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal.shade100, foregroundColor: Colors.teal.shade800),
+              ),
+            ],
           ),
         ],
       ),
@@ -309,7 +725,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                           label: const Text("Smart Route & Print", style: TextStyle(color: Colors.black)),
                           onPressed: () => _downloadAndSilentPrint(uniqueFiles),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.amber, 
+                            backgroundColor: Colors.amber,
                             padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                           ),
