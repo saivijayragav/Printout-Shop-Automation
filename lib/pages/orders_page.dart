@@ -297,6 +297,59 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   // --- Cloudflare R2 Logic (Simplified) ---
+  List<String> _r2KeyCandidates(dynamic fileSource, String orderIdStr) {
+    final String rawName;
+    if (fileSource is Map) {
+      rawName = fileSource['name']?.toString() ?? '';
+    } else {
+      rawName = fileSource.toString();
+    }
+
+    final trimmed = rawName.trim();
+    final decoded = Uri.decodeFull(trimmed).trim();
+    final baseName = decoded.split('/').last;
+    final cleanOrderId = orderIdStr.trim();
+    final names = <String>[
+      trimmed,
+      decoded,
+      baseName,
+      if (cleanOrderId.isNotEmpty) '$cleanOrderId$baseName',
+      if (cleanOrderId.isNotEmpty) '${cleanOrderId}_$baseName',
+      if (cleanOrderId.isNotEmpty) '$cleanOrderId$decoded',
+      if (cleanOrderId.isNotEmpty) '${cleanOrderId}_$decoded',
+    ];
+
+    final seen = <String>{};
+    return names.where((name) => name.isNotEmpty && seen.add(name)).toList();
+  }
+
+  bool _bytesMatchFileName(String fileName, Uint8List bytes) {
+    final lowerName = fileName.toLowerCase();
+    if (bytes.isEmpty) return false;
+
+    if (lowerName.endsWith('.pdf')) {
+      return bytes.length >= 4 && String.fromCharCodes(bytes.take(4)) == '%PDF';
+    }
+
+    if (lowerName.endsWith('.png')) {
+      return bytes.length >= 8 &&
+          bytes[0] == 0x89 &&
+          bytes[1] == 0x50 &&
+          bytes[2] == 0x4E &&
+          bytes[3] == 0x47 &&
+          bytes[4] == 0x0D &&
+          bytes[5] == 0x0A &&
+          bytes[6] == 0x1A &&
+          bytes[7] == 0x0A;
+    }
+
+    if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+      return bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+    }
+
+    return true;
+  }
+
   Future<Uint8List?> _fetchFileBytesFromR2(dynamic fileSource, String orderIdStr) async {
     final String rawName;
     if (fileSource is Map) {
@@ -305,15 +358,18 @@ class _OrdersPageState extends State<OrdersPage> {
       rawName = fileSource.toString();
     }
 
-    final variants = {"", rawName.trim(), Uri.decodeFull(rawName.trim())};
-
-    for (final name in variants) {
+    for (final name in _r2KeyCandidates(fileSource, orderIdStr)) {
       try {
         debugPrint("☁️ Fetching from R2: $name");
         final bytes = await CloudFlareR2.getObject(bucket: bucket, objectName: name);
         if (bytes.isNotEmpty) {
           debugPrint("✅ Fetched: $name (${bytes.length} bytes)");
-          return Uint8List.fromList(bytes);
+          final typedBytes = Uint8List.fromList(bytes);
+          if (!_bytesMatchFileName(rawName, typedBytes)) {
+            debugPrint("Invalid file bytes for key: $name");
+            continue;
+          }
+          return typedBytes;
         }
       } catch (e) {
         debugPrint("⚠️ Failed key: $name");
@@ -361,20 +417,24 @@ class _OrdersPageState extends State<OrdersPage> {
 
     if (await file.exists()) {
       final existingBytes = await file.readAsBytes();
-      if (existingBytes.isNotEmpty) {
+      if (_bytesMatchFileName(cleanNameLocal, existingBytes)) {
         debugPrint("Cache hit: ${file.path}");
         return (file: file, bytes: existingBytes);
       }
+      debugPrint("Invalid local cache, re-downloading: ${file.path}");
+      await file.delete();
     }
 
     final bytes = await _fetchFileBytesFromR2(fileSource, orderIdStr);
     if (bytes == null || bytes.isEmpty) return null;
 
     await file.writeAsBytes(bytes, flush: true);
-    if (await file.exists() && await file.length() > 0) {
+    final savedBytes = await file.readAsBytes();
+    if (await file.exists() && _bytesMatchFileName(cleanNameLocal, savedBytes)) {
       debugPrint("Saved locally: ${file.path}");
-      return (file: file, bytes: bytes);
+      return (file: file, bytes: savedBytes);
     }
+    debugPrint("Saved file failed validation: ${file.path}");
     return null;
   }
 
@@ -388,7 +448,12 @@ class _OrdersPageState extends State<OrdersPage> {
       debugPrint("Download ready locally: ${result.file.path}");
       if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ Saved to: ${result.file.path}"), backgroundColor: Colors.green));
-          if (Platform.isWindows) Process.run('explorer.exe', ['/select,', result.file.path]);
+          if (Platform.isWindows) {
+            final openResult = await Process.run('rundll32.exe', ['url.dll,FileProtocolHandler', result.file.path]);
+            if (openResult.exitCode != 0) {
+              await Process.run('explorer.exe', ['/select,', result.file.path]);
+            }
+          }
       }
     } catch (e) {
       debugPrint("Download failed: $e");
